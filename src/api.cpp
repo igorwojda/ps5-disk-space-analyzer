@@ -138,12 +138,17 @@ void UninstallField(std::ostringstream& o, const std::string& path) {
   if (!with.empty()) o << ",\"removedWith\":" << Str(with);
 }
 
+// The system partition is only looked at: what is safe there is not known
+// well enough for a list of protected folders to cover it, so nothing in its
+// scan is deleted, moved or moved into.
+bool ReadOnlyScanLocked() { return g.storage.kind == "system"; }
+
 // Fields shared by list rows and biggest files.
 void ItemFields(std::ostringstream& o, Node* n, const std::string& path) {
   o << "\"id\":" << n->id << ",\"name\":" << Str(n->name) << ",\"path\":" << Str(path)
     << ",\"size\":" << n->size << ",\"files\":" << n->files << ",\"dir\":" << Bool(n->isDir)
     << ",\"mount\":" << Bool(n->isMount) << ",\"error\":" << Bool(n->error)
-    << ",\"protected\":" << Bool(n->isMount || IsProtected(path));
+    << ",\"protected\":" << Bool(ReadOnlyScanLocked() || n->isMount || IsProtected(path));
   std::string w = DeleteWarning(path);
   if (!w.empty()) o << ",\"warn\":" << Str(w);
   UninstallField(o, path);
@@ -270,8 +275,7 @@ const GamePart* FindGamePart(const std::string& path) {
 
 // A cut item to paste, given by path: it may come from an earlier scan of
 // another storage. Only an existing, unprotected entry inside a listed storage
-// other than the system partition (that one only while it is the scanned
-// storage, as for delete), never a volume mounted there.
+// other than the system partition, never a volume mounted there.
 bool CutSourceOk(const std::string& path) {
   if (path.size() < 2 || path[0] != '/' || path.back() == '/') return false;
   if (path.find("/../") != std::string::npos || path.find("/./") != std::string::npos) return false;
@@ -281,7 +285,7 @@ bool CutSourceOk(const std::string& path) {
   bool listed = false;
   for (const Storage& st : ListStorages(g_extra))
     if (st.kind != "system" && IsInside(path, st.path)) listed = true;
-  if (!listed && FindNode(g.root, path)) listed = true;
+  if (!listed && !ReadOnlyScanLocked() && FindNode(g.root, path)) listed = true;
   if (!listed) return false;
   size_t slash = path.find_last_of('/');
   std::string parent = slash == 0 ? "/" : path.substr(0, slash);
@@ -305,6 +309,7 @@ std::vector<PathTarget> SelectedLocked(const Request& req, bool cut = false) {
     if (c == std::string::npos) c = ids.size();
     Node* n = g.index.Get((uint32_t)std::strtoul(ids.substr(pos, c - pos).c_str(), nullptr, 10));
     pos = c + 1;
+    if (ReadOnlyScanLocked()) break;
     if (!n || !n->parent || n->isMount || IsProtected(n->path())) continue;  // never the root
     paths.push_back(n->path());
   }
@@ -380,6 +385,7 @@ void StaleError(Response& res) {
 bool MoveDestinationOk(const std::string& dest) {
   for (const Storage& st : ListStorages(g_extra))
     if (st.path == dest) return st.kind != "system";
+  if (ReadOnlyScanLocked()) return false;
   Node* n = FindNode(g.root, dest);
   return n && n->isDir && !n->isMount && !IsProtected(dest);
 }

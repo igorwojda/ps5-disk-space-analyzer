@@ -669,6 +669,9 @@ function toggleGame(g) {
   render();
 }
 
+// The system partition is only looked at: the server marks all of it protected.
+const readOnlyScan = () => !!(S.storage && S.storage.kind === 'system');
+
 function toggleMark(item) {
   if (!item) return;
   if (S.clip && S.screen !== 'review') { toast(`${S.clipMode === 'move' ? 'Move' : 'Paste'} the waiting items first, or cancel in the Options menu`); return; }
@@ -677,6 +680,7 @@ function toggleMark(item) {
     S.marked.delete(item.path);
   } else if (item.protected) {
     toast(item.mount ? 'Separate volume: scan it from the storage list'
+                     : readOnlyScan() ? 'The system partition is read-only: nothing on it can be deleted'
                      : 'Protected system location: it cannot be deleted');
     return;
   } else if (isMarked(item)) {
@@ -854,6 +858,7 @@ function pasteFolder() {
 function pasteHere() {
   const n = pasteFolder();
   if (!n) { toast('Open a folder in the Folders tab to paste the items there'); return; }
+  if (readOnlyScan()) { toast('The system partition is read-only: items cannot be moved here'); return; }
   if (n.protected && n.id !== S.rootId) { toast('Protected system location: items cannot be moved here'); return; }
   if (S.clip.some((m) => n.path === m.path || n.path.startsWith(m.path + '/'))) {
     toast('A folder cannot be moved into itself');
