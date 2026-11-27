@@ -13,6 +13,7 @@ set(WEB_ASSETS
   "/app.css|text/css|web/app.css"
   "/app.js|application/javascript|web/app.js"
   "/icon0.png|image/png|assets/icon.png"
+  "/manifest.webmanifest|application/manifest+json|web/manifest.webmanifest"
   "/fonts/Lato-Regular.ttf|font/ttf|assets/fonts/LatoLatin-Regular.ttf"
   "/fonts/Lato-Bold.ttf|font/ttf|assets/fonts/LatoLatin-Bold.ttf"
 )

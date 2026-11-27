@@ -543,6 +543,7 @@ function act(el) {
     case 'hint': input(el.dataset.a, 'click'); break;
     case 'delbtn': askDelete(); break;
     case 'dlg': if (S.dialog && i !== S.dialog.hold) closeDialog(i); break;
+    case 'install': installApp(); break;
     default: break;
   }
 }
@@ -987,7 +988,7 @@ function renderBrowse() {
     hints += `<div class="hint-right"><div class="pill" data-act="hint" data-a="review">${GLYPH.triangle}
       ${fmtCount(S.marked.size)} selected &middot; ${fmtSize(markedBytes())} &nbsp; Review &amp; clean</div></div>`;
   } else {
-    hints += `<div class="hint-right muted">${glyphText('Press Square to select items to clean up')}</div>`;
+    hints += `<div class="hint-right muted">${glyphText('Press Square to select items to delete')}</div>`;
   }
   return [h, hints];
 }
@@ -1046,9 +1047,39 @@ async function loadInfo() {
   const host = info.ip || (local ? '' : location.hostname);
   const port = info.port || location.port;
   const url = host ? `http://${host}:${port}/` : `http://&lt;PS5 IP&gt;:${port}/`;
-  // The PS5 tile opens 127.0.0.1; any other device already is "in a browser".
+  // The PS5 tile opens 127.0.0.1; on any other device offer to install instead.
   $('#statusbar').innerHTML = `<span><b>v${esc(info.version)}</b></span>` +
-    (local ? `<span>Open in browser: <b>${host ? esc(url) : url}</b></span>` : '');
+    (local ? `<span>Open in browser: <b>${host ? esc(url) : url}</b></span>`
+      : installed() ? '' : '<span class="install" data-act="install"><b>Install app</b></span>');
+}
+
+// ---------------------------------------------------------------- install (other devices)
+
+let installPrompt = null;  // only fired over HTTPS or localhost
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+window.addEventListener('appinstalled', () => { installPrompt = null; loadInfo(); });
+
+function installed() {
+  return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
+async function installApp() {
+  if (installPrompt) {
+    const p = installPrompt;
+    installPrompt = null;
+    p.prompt();
+    await p.userChoice;
+    return;
+  }
+  // The PS5 serves plain http on the LAN, where browsers keep the install prompt to themselves.
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const lines = ios ? ['Tap the Share button, then "Add to Home Screen".']
+    : /Android/.test(ua) ? ['Open the browser menu (⋮), then "Add to Home screen".']
+    : /Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua) ? ['In the menu bar choose File, then "Add to Dock".']
+    : /Firefox/.test(ua) ? ['Firefox can\'t install web apps. Bookmark this page, or open it in Chrome or Edge.']
+    : ['Open the browser menu (⋮), then "Cast, save, and share" › "Install page as app" (Chrome) or "Apps" › "Install this site as an app" (Edge).'];
+  showDialog({ title: 'Install app', lines });
 }
 
 // ================================================================ layout + start

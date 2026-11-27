@@ -1,0 +1,12 @@
+{
+  "name": "Storage Space Analyzer",
+  "short_name": "Storage",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#081d36",
+  "theme_color": "#081d36",
+  "icons": [
+    { "src": "/icon0.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
