@@ -1,4 +1,4 @@
-// Disk Space Analyzer web UI.
+// Storage Space Analyzer web UI.
 //
 // Screens: home (pick storage) -> scanning -> browse (select) -> review -> deleting.
 //
@@ -343,7 +343,7 @@ function stopPayload() {
     onChoose: (i) => {
       if (i !== 1) return;
       api('/api/quit', 'POST').catch(() => {});
-      document.body.innerHTML = '<p style="font:32px Lato,sans-serif;color:#eaf2ff;text-align:center;margin-top:40vh">Disk Space Analyzer stopped.</p>';
+      document.body.innerHTML = '<p style="font:32px Lato,sans-serif;color:#eaf2ff;text-align:center;margin-top:40vh">Storage Space Analyzer stopped.</p>';
     },
   });
 }
@@ -822,7 +822,7 @@ function header(title, sub, tabs) {
 }
 
 function renderHome() {
-  let h = `<div class="abs home-title">Disk Space Analyzer</div>
+  let h = `<div class="abs home-title">Storage Space Analyzer</div>
     <div class="abs home-sub">Choose a storage to scan. Find what takes space, select it, clean it up.</div>
     <div class="abs cards">`;
   S.storages.forEach((s, i) => {
@@ -1020,7 +1020,7 @@ async function loadInfo() {
   const host = info.ip || (local ? '' : location.hostname);
   const port = info.port || location.port;
   const url = host ? `http://${host}:${port}/` : `http://&lt;PS5 IP&gt;:${port}/`;
-  $('#statusbar').innerHTML = `<span>Disk Space Analyzer <b>v${esc(info.version)}</b></span>
+  $('#statusbar').innerHTML = `<span>Storage Space Analyzer <b>v${esc(info.version)}</b></span>
     <span>Open on a computer or phone: <b>${host ? esc(url) : url}</b></span>`;
 }
 

@@ -69,7 +69,7 @@ int InstallLauncher(unsigned short port) {
                 "  \"localizedParameters\": {\n"
                 "    \"defaultLanguage\": \"en-US\",\n"
                 "    \"en-US\": {\n"
-                "      \"titleName\": \"Disk Space Analyzer\"\n"
+                "      \"titleName\": \"Storage Space Analyzer\"\n"
                 "    }\n"
                 "  }\n"
                 "}\n",

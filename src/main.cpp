@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Disk Space Analyzer: a payload that serves a web UI for finding and
+// Storage Space Analyzer: a payload that serves a web UI for finding and
 // deleting what takes space. On the PS5 it also adds a tile to the Media tab
 // that opens the UI in the console's browser.
 #include <signal.h>
@@ -88,7 +88,7 @@ int main(int argc, char* argv[]) {
 
   port = FindFreePort(port);
   if (!port) {
-    Notify("Disk Space Analyzer: no free network port");
+    Notify("Storage Space Analyzer: no free network port");
     return 1;
   }
   ApiInit(web_dir, extra, port);
@@ -97,9 +97,9 @@ int main(int argc, char* argv[]) {
   Log("version %s, %s", APP_VERSION, url.c_str());
 
   if (InstallLauncher(port) == 0) {
-    Notify("Disk Space Analyzer %s is running\nOpen it from Media, or %s", APP_VERSION, url.c_str());
+    Notify("Storage Space Analyzer %s is running\nOpen it from Media, or %s", APP_VERSION, url.c_str());
   } else {
-    Notify("Disk Space Analyzer %s is running on %s\n(the Media tile could not be added, see log)",
+    Notify("Storage Space Analyzer %s is running on %s\n(the Media tile could not be added, see log)",
            APP_VERSION, url.c_str());
   }
 #if !defined(__PROSPERO__)

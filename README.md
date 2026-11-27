@@ -1,9 +1,9 @@
-# Disk Space Analyzer for PS5
+# Storage Space Analyzer for PS5
 
 Find what takes space on a jailbroken PS5 and clean it up: **scan → select → clean up**.
 
 `disk-analyzer.elf` is a payload that runs in the background and serves a web
-UI. It adds a **Disk Space Analyzer** tile to the **Media** tab that opens the
+UI. It adds a **Storage Space Analyzer** tile to the **Media** tab that opens the
 UI in the PS5 browser. The same UI, with every feature, works from a phone or
 PC on the same network: the bar at the bottom of the screen shows the app
 version and the address to open (`http://<ps5-ip>:8833/`).
@@ -21,8 +21,8 @@ version and the address to open (`http://<ps5-ip>:8833/`).
 
 1. Send `disk-analyzer.elf` to the console's ELF loader (port 9021):
    `make send PS5_HOST=<ip>`, or `nc -q0 <ip> 9021 < disk-analyzer.elf`.
-2. A toast says "Disk Space Analyzer 1.0.0 is running" with the address.
-3. Open **Media → Disk Space Analyzer**, or browse to the address from the
+2. A toast says "Storage Space Analyzer 1.0.0 is running" with the address.
+3. Open **Media → Storage Space Analyzer**, or browse to the address from the
    toast (also shown in the bottom bar) on a computer or phone.
 
 Send the ELF again to update it: the new copy replaces the running one. The
