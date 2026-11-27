@@ -197,7 +197,8 @@ const S = {
   storage: null, rootId: 0, rootNode: null,
   node: null, tab: 0, focus: 0, scroll: 0,
   biggest: [], bfocus: 0, bscroll: 0,
-  games: 'idle', gameList: [], gfocus: 0, gscroll: 0,  // Games tab: list of games
+  games: 'idle', allGames: [], gameList: [], gfocus: 0, gscroll: 0,  // Games or Apps tab: its list
+  gkind: 2, gsaved: {},  // ... which of the two tabs gameList is for, and the other's place
   game: null, pfocus: 0, pscroll: 0,                  // ... and the open game's folders
   gpart: null, gnode: null, nfocus: 0, nscroll: 0,    // ... and a folder browsed inside one of them
   marked: new Map(),  // path -> item
@@ -250,11 +251,39 @@ function hasMarkedInside(item) {
 
 function focusedItem() {
   if (S.tab === 1) return S.biggest[S.bfocus] || null;
-  if (S.tab === 2) {
+  if (isGamesTab()) {
     if (S.gnode) return S.gnode.children[S.nfocus] || null;
     return (S.game ? S.game.parts[S.pfocus] : S.gameList[S.gfocus]) || null;
   }
   return S.node ? S.node.children[S.focus] || null : null;
+}
+
+// Games (2) and Apps (3) are the same view over a different part of the list.
+const TABS = 4;
+function isGamesTab(t = S.tab) { return t === 2 || t === 3; }
+function tabList(t) { return S.allGames.filter((g) => (g.akind === 'game') === (t === 2)); }
+const tabWord = (games, apps) => (S.gkind === 3 ? apps : games);
+
+// Switch tabs; between Games and Apps each keeps its own open title and focus.
+function setTab(t) {
+  if (isGamesTab(t) && t !== S.gkind) {
+    S.gsaved[S.gkind] = { gfocus: S.gfocus, gscroll: S.gscroll, gid: S.game ? S.game.gid : '',
+      pfocus: S.pfocus, pscroll: S.pscroll, ppath: S.gpart ? S.gpart.path : '', gnode: S.gnode,
+      nfocus: S.nfocus, nscroll: S.nscroll };
+    ++loadToken;  // a folder still opening belongs to the other tab
+    const v = S.gsaved[t] || {};
+    S.gkind = t;
+    S.gameList = tabList(t);
+    S.gfocus = v.gfocus || 0; S.gscroll = v.gscroll || 0;
+    S.pfocus = v.pfocus || 0; S.pscroll = v.pscroll || 0;
+    S.nfocus = v.nfocus || 0; S.nscroll = v.nscroll || 0;
+    S.game = v.gid ? S.gameList.find((g) => g.gid === v.gid) || null : null;
+    S.gpart = S.game && v.ppath ? S.game.parts.find((p) => p.path === v.ppath) || null : null;
+    S.gnode = S.gpart ? v.gnode : null;
+    clampList('gfocus', 'gscroll', S.gameList.length, GVIS);
+    clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
+  }
+  S.tab = t;
 }
 
 let toastTimer = 0;
@@ -309,15 +338,20 @@ async function loadBiggest() {
 
 // A game's folders, shaped like list items so selection and review treat them
 // like any folder. `cid` is the chart's id for it.
+const APP_FILES = { app: 'PlayStation App', webapp: 'Web App' };
 function gameItem(g) {
   const title = g.title || g.id;
+  const kind = g.kind || 'game';
   const parts = g.parts.map((p) => ({
     id: p.node != null ? p.node : null, parentId: p.parent != null ? p.parent : -1,
-    cid: 'p:' + p.path, gid: g.id, path: p.path, name: p.cat, title, volume: p.volume,
+    cid: 'p:' + p.path, gid: g.id, path: p.path, name: p.cat === 'Game' && APP_FILES[kind] || p.cat, title, volume: p.volume,
     size: p.size, files: p.files, dir: true, error: p.error, protected: p.protected, warn: p.warn,
     uninstall: p.uninstall, removedWith: p.removedWith,
   }));
-  return { kind: 'game', id: 'g:' + g.id, cid: 'g:' + g.id, gid: g.id, name: title, sub: g.title ? g.id : '', title: g.title,
+  // The install folder first, then the rest biggest first (as sent).
+  const main = (p) => (MAIN_FILES.includes(p.name) ? 0 : 1);
+  parts.sort((a, b) => main(a) - main(b));
+  return { kind: 'game', akind: kind, id: 'g:' + g.id, cid: 'g:' + g.id, gid: g.id, name: title, sub: g.title ? g.id : '', title: g.title,
            icon: g.icon, size: g.size, files: g.files, dir: true, parts };
 }
 
@@ -327,7 +361,8 @@ async function loadGames() {
   let r;
   try { r = await api('/api/games'); } catch (e) { gamesTimer = setTimeout(loadGames, 2000); return; }
   S.games = r.state;
-  S.gameList = r.games.map(gameItem);
+  S.allGames = r.games.map(gameItem);
+  S.gameList = tabList(S.gkind);
   if (S.game) S.game = S.gameList.find((g) => g.gid === S.game.gid) || null;
   if (S.gpart) {
     const p = S.game && S.game.parts.find((x) => x.path === S.gpart.path);
@@ -337,7 +372,7 @@ async function loadGames() {
   clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
   if (gamesPlace) await restoreGames(r.state !== 'counting');
   if (r.state === 'counting') gamesTimer = setTimeout(loadGames, 1000);
-  if (S.screen === 'browse' && S.tab === 2) render();
+  if (S.screen === 'browse' && isGamesTab()) render();
 }
 
 async function startScan(storage) {
@@ -382,6 +417,9 @@ async function enterBrowse(st, place) {
   S.game = S.gpart = S.gnode = null;
   S.gfocus = S.gscroll = 0;
   const back = place && place.storage === S.storage.path ? place : null;
+  S.gsaved = {};
+  S.gkind = back && back.tab === 3 ? 3 : 2;
+  S.gameList = tabList(S.gkind);
   gamesPlace = back && back.gid ? back : null;
   loadGames();
   await loadBiggest();
@@ -531,7 +569,7 @@ function cancelScan() {
 // The list on screen in the browse tab, with its focus and scroll keys.
 function browseList() {
   if (S.tab === 1) return { fk: 'bfocus', sk: 'bscroll', list: S.biggest };
-  if (S.tab === 2) {
+  if (isGamesTab()) {
     if (S.gnode) return { fk: 'nfocus', sk: 'nscroll', list: S.gnode.children };
     if (S.game) return { fk: 'pfocus', sk: 'pscroll', list: S.game.parts };
     return { fk: 'gfocus', sk: 'gscroll', list: S.gameList };
@@ -604,7 +642,7 @@ function reveal(id, parentId) {
 function addMark(item) {
   for (const [k, m] of S.marked) if (m.path.startsWith(item.path + '/')) S.marked.delete(k);
   // Remember the folder it lives in, so the review screen can show it.
-  const cur = S.tab === 2 && S.gnode ? S.gnode : S.node;
+  const cur = isGamesTab() && S.gnode ? S.gnode : S.node;
   const parentId = item.parentId != null ? item.parentId : cur ? cur.id : S.rootId;
   S.marked.set(item.path, Object.assign({ parentId }, item));
 }
@@ -805,7 +843,7 @@ function cancelCut() {
 // The folder on screen, when cut items can go there.
 function pasteFolder() {
   if (S.tab === 0 && S.node) return S.node;
-  if (S.tab === 2 && S.gnode) return S.gnode;
+  if (isGamesTab() && S.gnode) return S.gnode;
   return null;
 }
 
@@ -1238,7 +1276,7 @@ function homeInput(a) {
 }
 
 function browseInput(a) {
-  if (a === 'tabprev' || a === 'tabnext') { S.tab = (S.tab + (a === 'tabnext' ? 1 : 2)) % 3; S.hover = null; render(); return; }
+  if (a === 'tabprev' || a === 'tabnext') { setTab((S.tab + (a === 'tabnext' ? 1 : TABS - 1)) % TABS); S.hover = null; render(); return; }
   if (a === 'menu') { openMenu(); return; }
   if (a === 'review') { if (S.clip) pasteHere(); else openReview(); return; }
   if (S.mfocus >= 0) { menuInput(a); return; }
@@ -1246,7 +1284,7 @@ function browseInput(a) {
     const b = browseList();
     if (S[b.fk] <= 0) { S.mfocus = 0; render(); return; }
   }
-  if (S.tab === 2) { gamesInput(a); return; }
+  if (isGamesTab()) { gamesInput(a); return; }
   if (S.tab === 1) {
     const n = S.biggest.length;
     const f = S.biggest[S.bfocus];
@@ -1366,11 +1404,11 @@ function act(el) {
   const k = el.dataset.act, i = Number(el.dataset.i);
   switch (k) {
     case 'storage': S.hfocus = i; startScan(S.storages[i]); break;
-    case 'tab': S.tab = i; S.hover = null; render(); break;
+    case 'tab': setTab(i); S.hover = null; render(); break;
     case 'crumb': S.tab = 0; openNode(i); break;
     case 'check': {
       const item = S.screen === 'review' ? markedList()[i] : S.tab === 1 ? S.biggest[i]
-        : S.tab === 2 ? (S.gnode ? S.gnode.children[i] : S.game ? S.game.parts[i] : S.gameList[i]) : S.node.children[i];
+        : isGamesTab() ? (S.gnode ? S.gnode.children[i] : S.game ? S.game.parts[i] : S.gameList[i]) : S.node.children[i];
       toggleMark(item);
       if (S.screen === 'review' && !S.marked.size) { S.screen = 'browse'; render(); }
       break;
@@ -1378,7 +1416,7 @@ function act(el) {
     case 'row':
       if (S.screen === 'review') { S.rfocus = i; S.rbtn = -1; revealPath(markedList()[i]); break; }
       if (S.tab === 1) { S.bfocus = i; reveal(S.biggest[i].id, S.biggest[i].parentId); break; }
-      if (S.tab === 2) {
+      if (isGamesTab()) {
         if (S.gnode) {
           const c = S.gnode.children[i];
           S.nfocus = i;
@@ -1398,7 +1436,7 @@ function act(el) {
         if (j >= 0) { S.bfocus = j; reveal(S.biggest[j].id, S.biggest[j].parentId); }
         break;
       }
-      if (S.tab === 2) {
+      if (isGamesTab()) {
         if (S.gnode) {
           if (s.dir && s.hasKids) openGameNode(s.id);
           else openGameNode(s.chain.length > 1 ? s.chain[s.chain.length - 2] : chart.rootId, s.id);
@@ -1417,7 +1455,7 @@ function act(el) {
       else reveal(s.id, s.chain.length > 1 ? s.chain[s.chain.length - 2] : chart.rootId);
       break;
     }
-    case 'center': if (S.tab === 0) goUp(); else if (S.tab === 2) { if (S.gnode) gameUp(); else closeGame(); } break;
+    case 'center': if (S.tab === 0) goUp(); else if (isGamesTab()) { if (S.gnode) gameUp(); else closeGame(); } break;
     case 'gcrumb': closeGame(); break;
     case 'gpcrumb': closePart(); break;
     case 'gncrumb': openGameNode(i); break;
@@ -1444,7 +1482,7 @@ function hover(el) {
   if (k === 'row' || k === 'check') {
     if (S.screen === 'review') { if (S.rfocus !== i || S.rbtn >= 0) { S.rfocus = i; S.rbtn = -1; changed = true; } }
     else if (S.tab === 1) { if (S.bfocus !== i) { S.bfocus = i; changed = true; } }
-    else if (S.tab === 2) {
+    else if (isGamesTab()) {
       const fk = S.gnode ? 'nfocus' : S.game ? 'pfocus' : 'gfocus';
       if (S[fk] !== i) { S[fk] = i; changed = true; }
     } else if (S.focus !== i) { S.focus = i; changed = true; }
@@ -1465,10 +1503,10 @@ function hover(el) {
       } else if (s && S.tab === 1) {
         const j = S.biggest.findIndex((c) => c.id === s.id);
         if (j >= 0) { S.bfocus = j; clampList('bfocus', 'bscroll', S.biggest.length); }
-      } else if (s && S.tab === 2 && S.gnode) {
+      } else if (s && isGamesTab() && S.gnode) {
         const j = S.gnode.children.findIndex((c) => c.id === s.chain[0]);
         if (j >= 0) { S.nfocus = j; clampList('nfocus', 'nscroll', S.gnode.children.length); }
-      } else if (s && S.tab === 2) {
+      } else if (s && isGamesTab()) {
         const [fk, sk, list] = S.game ? ['pfocus', 'pscroll', S.game.parts] : ['gfocus', 'gscroll', S.gameList];
         const j = list.findIndex((c) => c.cid === s.chain[0]);
         if (j >= 0) { S[fk] = j; clampList(fk, sk, list.length, S.game ? PVIS : GVIS); }
@@ -1760,6 +1798,7 @@ function header(title, sub, tabs) {
       <div class="tab${S.tab === 0 ? ' on' : ''}" data-act="tab" data-i="0">Folders</div>
       <div class="tab${S.tab === 1 ? ' on' : ''}" data-act="tab" data-i="1">Biggest Files</div>
       <div class="tab${S.tab === 2 ? ' on' : ''}" data-act="tab" data-i="2">Games</div>
+      <div class="tab${S.tab === 3 ? ' on' : ''}" data-act="tab" data-i="3">Apps</div>
       </div>${GLYPH.r1}</div>`;
   }
   if (st && st.total) {
@@ -1865,7 +1904,9 @@ function iconHtml(item) {
 
 // Kinds of data in a game row, in a grid of two columns of three lines filled
 // column by column: game files first, then the player's own data and the rest.
-const GAME_FILES = ['Game', 'Game dump', 'PS5 title', 'Update', 'Add-ons', 'Downloads', 'Install data'];
+// The title's own install folder comes first, whatever its size.
+const MAIN_FILES = ['Game', 'PlayStation App', 'Web App'];
+const GAME_FILES = ['Game', 'PlayStation App', 'Web App', 'Game dump', 'PS5 title', 'Update', 'Add-ons', 'Downloads', 'Install data'];
 const KIND_DOT = { Saves: '#5be0b5', Captures: '#f0a0d8', License: '#f2c46d', Metadata: '#8fa3bb', Other: '#8fa3bb' };
 
 function kindGrid(kinds) {
@@ -1885,7 +1926,8 @@ function gameRow(g, i, focused, total) {
   const by = new Map();
   for (const p of g.parts) by.set(p.name, (by.get(p.name) || 0) + p.size);
   const bySize = [...by].sort((a, b) => b[1] - a[1]);
-  const kinds = bySize.filter((k) => GAME_FILES.includes(k[0]))
+  const kinds = bySize.filter((k) => MAIN_FILES.includes(k[0]))
+    .concat(bySize.filter((k) => GAME_FILES.includes(k[0]) && !MAIN_FILES.includes(k[0])))
     .concat(bySize.filter((k) => !GAME_FILES.includes(k[0])));
   const frac = total ? g.size / total : 0;
   const color = focused ? '#fff' : chart.colors.get(g.cid) || '#6fb1ff';
@@ -1962,21 +2004,21 @@ function renderBrowse() {
     h += scrollbar(S.bscroll, S.biggest.length);
     const total = S.biggest.reduce((t, b) => t + b.size, 0);
     buildChart({ id: -2, size: total, rings: S.biggest.map((b) => ({ id: b.id, name: b.name, size: b.size })) }, true);
-  } else if (S.tab === 2 && S.gnode) {
+  } else if (isGamesTab() && S.gnode) {
     h += folderPanel(S.gnode, S.nfocus, S.nscroll);
-  } else if (S.tab === 2) {
+  } else if (isGamesTab()) {
     h += renderGames();
   }
 
   // Center disc: what is under focus, relative to the chart root.
   const croot = S.tab === 0 ? S.node : S.tab === 1 ? S.rootNode : S.gnode || S.game || gamesRoot();
-  if (croot && (S.tab !== 2 || S.gameList.length)) {
+  if (croot && (!isGamesTab() || S.gameList.length)) {
     const f = focusedItem();
     const info = S.hover || f || croot;
     const name = nodeName(info);
     const g2 = info.sub || info.title;
     const game = g2 ? `<div class="g ellipsis">${esc(g2)}</div>` : '';
-    const of = S.tab === 1 ? ' of storage' : S.tab === 0 || S.gnode ? ' of folder' : S.game ? ' of game' : ' of all games';
+    const of = S.tab === 1 ? ' of storage' : S.tab === 0 || S.gnode ? ' of folder' : S.game ? tabWord(' of game', ' of app') : tabWord(' of all games', ' of all apps');
     let p;
     if (info !== croot && croot.size) p = fmtPct(info.size / croot.size) + of;
     else p = fmtCount(croot.files) + ' files';
@@ -1988,7 +2030,7 @@ function renderBrowse() {
   // pointer), wrapping as needed, since rows and the centre disc cut it.
   // Game folders show the game's name with the title ID.
   let ct = null;
-  if (S.tab === 2 && !S.gnode) {
+  if (isGamesTab() && !S.gnode) {
     const hg = S.hover && !S.game ? S.gameList.find((x) => x.cid === S.hover.chain[0]) : null;
     const g = S.game || hg || S.gameList[S.gfocus];
     if (g) ct = { name: g.name, sub: g.sub };
@@ -1999,9 +2041,9 @@ function renderBrowse() {
   if (ct) h += `<div class="abs ctitle">${esc(ct.name)}${ct.sub ? `<span class="tid">${esc(ct.sub)}</span>` : ''}</div>`;
 
   // Breadcrumb
-  if (S.tab === 2) {
+  if (isGamesTab()) {
     const g = S.game, n = S.gnode;
-    let parts = ['<span data-act="gcrumb">Games</span>'];
+    let parts = [`<span data-act="gcrumb">${tabWord('Games', 'Apps')}</span>`];
     if (g) parts.push(n ? `<span data-act="gpcrumb">${esc(g.name)}</span>` : `<b>${esc(g.name)}</b>`);
     if (n) {
       // The folder's own crumbs, from the game folder down.
@@ -2011,7 +2053,7 @@ function renderBrowse() {
         return i === cr.length - 1 ? `<b>${label}</b>` : `<span data-act="gncrumb" data-i="${c.id}">${label}</span>`;
       }));
     }
-    if (!g) parts = ['<b>Games</b>'];
+    if (!g) parts = [`<b>${tabWord('Games', 'Apps')}</b>`];
     if (parts.length > 6) parts = parts.slice(0, 2).concat(['&hellip;'], parts.slice(-3));
     h += `<div class="abs crumbs ellipsis">${parts.join(' &nbsp;&rsaquo;&nbsp; ')}</div>`;
   } else if (S.node) {
@@ -2050,7 +2092,7 @@ function renderBrowse() {
 // A folder's name; the scanned root and a game folder go by friendlier names.
 function nodeName(n) {
   if (n.id === S.rootId) return (S.storage || {}).name || n.name;
-  if (S.tab === 2 && S.gpart && n.id === S.gpart.id) return S.gpart.name;
+  if (isGamesTab() && S.gpart && n.id === S.gpart.id) return S.gpart.name;
   return n.name;
 }
 
@@ -2072,7 +2114,7 @@ function folderPanel(n, focus, scroll) {
 function gamesRoot() {
   let size = 0, files = 0;
   for (const g of S.gameList) { size += g.size; files += g.files; }
-  return { id: 'games', cid: 'games', name: 'All games', size, files };
+  return { id: 'games', cid: 'games', name: tabWord('All games', 'All apps'), size, files };
 }
 
 function renderGames() {
@@ -2089,13 +2131,13 @@ function renderGames() {
   }
   const all = gamesRoot();
   const counting = S.games === 'counting';
-  h = `<div class="abs panel-title">Games</div>
-    <div class="abs panel-meta">${counting ? 'Counting&hellip;' : `${fmtCount(S.gameList.length)} games &middot; ${fmtSize(all.size)}`}</div>
+  h = `<div class="abs panel-title">${tabWord('Games', 'Apps')}</div>
+    <div class="abs panel-meta">${counting ? 'Counting&hellip;' : `${fmtCount(S.gameList.length)} ${tabWord('games', 'apps')} &middot; ${fmtSize(all.size)}`}</div>
     <div class="abs rows m">`;
   for (let i = S.gscroll; i < S.gameList.length && i < S.gscroll + GVIS; i++)
     h += row(S.gameList[i], i, S.mfocus < 0 && i === S.gfocus, 3, all.size);
   h += '</div>' + scrollbar(S.gscroll, S.gameList.length, GVIS);
-  if (!S.gameList.length) h += `<div class="abs empty">${counting ? 'Counting game data on all storages&hellip;' : 'No games found'}</div>`;
+  if (!S.gameList.length) h += `<div class="abs empty">${counting ? 'Counting data on all storages&hellip;' : tabWord('No games found', 'No apps found')}</div>`;
   if (S.gameList.length) {
     buildChart({ id: 'games', size: all.size, rings: S.gameList.map((x) => ({
       id: x.cid, name: x.name, title: x.sub, size: x.size, dir: true,

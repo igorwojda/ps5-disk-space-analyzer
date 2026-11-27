@@ -17,6 +17,7 @@ bool IsTitleId(const std::string& name);
 struct GameInfo {
   std::string title;  // "" when no metadata was found
   std::string icon;   // path of icon0.png, "" when none
+  std::string kind;   // AppKindFromParamJson(), "game" without a param.json
 };
 
 // Looks the title up once and caches it. `folder` is the folder being shown,
@@ -29,6 +30,10 @@ void ClearGameCache();
 // Exposed for tests: the title in a param.json / param.sfo, or "".
 std::string TitleFromParamJson(const std::string& json);
 std::string TitleFromParamSfo(const std::string& sfo);
+// What a param.json describes: "webapp" (a homebrew tile that opens the
+// browser on a payload's local web server: deeplinkUri http://127.0.0.1:...),
+// "app" (applicationCategoryType not 0: YouTube, Twitch) or "game".
+std::string AppKindFromParamJson(const std::string& json);
 
 // ---------------------------------------------------------------- game data
 

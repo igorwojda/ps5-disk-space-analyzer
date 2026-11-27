@@ -374,7 +374,7 @@ std::string GamesJson() {
     o << (i ? "," : "") << "{\"id\":" << Str(gt.id) << ",\"size\":" << gt.size << ",\"files\":" << gt.files;
     if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
     if (!gi.icon.empty()) o << ",\"icon\":true";
-    o << ",\"parts\":[";
+    o << ",\"kind\":" << Str(gi.kind) << ",\"parts\":[";
     for (size_t k = 0; k < gt.parts.size(); k++) {
       const GamePart& part = gt.parts[k];
       Node* n = FindNode(g.root, part.path);

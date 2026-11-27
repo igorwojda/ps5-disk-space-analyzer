@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -156,6 +158,16 @@ std::string TitleFromParamJson(const std::string& s) {
   return t == std::string::npos ? "" : Trim(JsonString(s, t));
 }
 
+std::string AppKindFromParamJson(const std::string& s) {
+  size_t d = FindKey(s, "deeplinkUri", 0);
+  std::string uri = d == std::string::npos ? "" : Trim(JsonString(s, d));
+  for (const char* local : {"http://127.0.0.1", "http://localhost"})
+    if (uri.compare(0, std::strlen(local), local) == 0) return "webapp";
+  size_t c = FindKey(s, "applicationCategoryType", 0);
+  if (c == std::string::npos) return "game";
+  return std::strtol(s.c_str() + c, nullptr, 10) != 0 ? "app" : "game";
+}
+
 // PARAM.SFO: header (magic "\0PSF", version, key table, data table, count),
 // then 16-byte entries (key offset u16, format u16, length, max length, data offset).
 std::string TitleFromParamSfo(const std::string& s) {
@@ -194,11 +206,16 @@ GameInfo LookupGame(const std::string& id, const std::string& folder) {
   };
   GameInfo info;
   for (const std::string& d : dirs) {
-    if (info.title.empty()) info.title = TitleFromParamJson(ReadSmallFile(d + "/param.json"));
+    if (info.title.empty()) {
+      std::string json = ReadSmallFile(d + "/param.json");
+      info.title = TitleFromParamJson(json);
+      if (!info.title.empty()) info.kind = AppKindFromParamJson(json);
+    }
     if (info.title.empty()) info.title = TitleFromParamSfo(ReadSmallFile(d + "/param.sfo"));
     if (info.icon.empty() && IsFile(d + "/icon0.png")) info.icon = d + "/icon0.png";
     if (!info.title.empty() && !info.icon.empty()) break;
   }
+  if (info.kind.empty()) info.kind = "game";
   g_cache.emplace(id, info);
   return info;
 }
