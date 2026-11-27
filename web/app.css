@@ -129,17 +129,18 @@ svg { display: block; }
 .scroll > i { position: absolute; left: 0; width: 6px; border-radius: 3px; background: rgba(255, 255, 255, .43); }
 
 /* ---------------------------------------------------------------- chart */
-#chart { left: 1080px; top: 200px; width: 780px; height: 780px; }
+/* Sized so the outer ring ends above the full-width breadcrumb. */
+#chart { left: 1100px; top: 196px; width: 740px; height: 740px; }
 #chart path { transition: opacity .12s; }
 #chart path.dim { opacity: .38; }
 #chart path.hl { stroke: #fff; stroke-width: 4; paint-order: stroke; }
 .center {
-  left: 1353px; top: 473px; width: 234px; height: 234px; border-radius: 50%;
+  left: 1359px; top: 455px; width: 222px; height: 222px; border-radius: 50%;
   background: var(--center-bg); box-shadow: 0 0 0 4px rgba(127, 178, 255, .6) inset;
   display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
 }
-.center .n { font-size: calc(26px * var(--fs)); font-weight: 700; max-width: 200px; }
-.center .g { font-size: calc(18px * var(--fs)); color: var(--center-sub); max-width: 200px; margin-top: 2px; }
+.center .n { font-size: calc(26px * var(--fs)); font-weight: 700; max-width: 190px; }
+.center .g { font-size: calc(18px * var(--fs)); color: var(--center-sub); max-width: 190px; margin-top: 2px; }
 .center .s { font-size: calc(34px * var(--fs)); font-weight: 700; margin: 4px 0; }
 .center .p { font-size: calc(20px * var(--fs)); color: var(--center-sub); }
 
@@ -149,7 +150,7 @@ svg { display: block; }
           -webkit-line-clamp: 3; overflow: hidden; }
 .ctitle .tid { font-size: calc(22px * var(--fs)); font-weight: 400; color: var(--dim); margin-left: 12px; white-space: nowrap; }
 
-.crumbs { left: 48px; bottom: 106px; width: 984px; line-height: 1.2; font-size: calc(30px * var(--fs)); color: var(--dim); }
+.crumbs { left: 48px; bottom: 106px; width: 1824px; line-height: 1.2; font-size: calc(30px * var(--fs)); color: var(--dim); }
 .crumbs b { color: var(--text); }
 .crumbs span[data-act] { padding: 2px 0; }
 
