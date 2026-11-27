@@ -21,6 +21,7 @@ struct Response {
   std::string body;
   const void* data = nullptr;  // static data instead of body
   size_t size = 0;
+  std::string cache = "no-store";  // Cache-Control
 };
 
 using Handler = std::function<void(const Request&, Response&)>;

@@ -14,6 +14,8 @@ version and the address to open (`http://<ps5-ip>:8833/`).
 - Folder list sorted by size next to a sunburst chart (4 levels deep). The
   focused item lights up in the chart.
 - **Biggest Files** tab: the 500 largest files.
+- Game folders (`PPSA01325`, `CUSA00207`, ...) show the game's name and icon,
+  read from the console's own game metadata.
 - Select files and folders, check the review screen (space you get back, free
   space afterwards), then **hold ✕** to delete.
 - System locations are locked and cannot be selected.

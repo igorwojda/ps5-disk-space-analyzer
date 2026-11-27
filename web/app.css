@@ -81,6 +81,12 @@ svg { display: block; }
 .row.focus { background: var(--focus-bg); }
 .row .chk { width: 30px; height: 30px; margin: 0 20px; flex: none; }
 .row .ico { width: 40px; height: 40px; margin-right: 16px; flex: none; }
+.row .ico img { display: block; width: 40px; height: 40px; border-radius: 6px; object-fit: cover; }
+.row .game { font-size: calc(20px * var(--fs)); line-height: 1.15; color: var(--dim); }
+.row.game-row .name { line-height: 1.15; }
+.row.game-row .rbar { margin-top: 4px; }
+.row.focus .game { color: var(--text); }
+.panel-title .tid { font-size: calc(22px * var(--fs)); font-weight: 400; color: var(--dim); margin-left: 8px; }
 .row .mid { flex: 1; min-width: 0; }
 .row .name { font-size: calc(28px * var(--fs)); }
 .row .rbar { margin-top: 8px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .09); }
@@ -106,6 +112,7 @@ svg { display: block; }
   display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
 }
 .center .n { font-size: calc(26px * var(--fs)); font-weight: 700; max-width: 220px; }
+.center .g { font-size: calc(18px * var(--fs)); color: var(--center-sub); max-width: 220px; margin-top: 2px; }
 .center .s { font-size: calc(34px * var(--fs)); font-weight: 700; margin: 4px 0; }
 .center .p { font-size: calc(20px * var(--fs)); color: var(--center-sub); }
 

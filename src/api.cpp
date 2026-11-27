@@ -9,6 +9,7 @@
 #include <mutex>
 #include <sstream>
 
+#include "games.h"
 #include "platform.h"
 #include "system.h"
 #include "tree.h"
@@ -79,6 +80,14 @@ std::string JoinPath(const std::string& base, const std::string& name) {
   return base.empty() || base.back() == '/' ? base + name : base + "/" + name;
 }
 
+// A folder named after a title ID: the game's name, and whether it has an icon.
+void GameFields(std::ostringstream& o, Node* n, const std::string& path) {
+  if (!n->isDir || !IsTitleId(n->name)) return;
+  GameInfo gi = LookupGame(n->name, path);
+  if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
+  if (!gi.icon.empty()) o << ",\"icon\":true";
+}
+
 // Fields shared by list rows and biggest files.
 void ItemFields(std::ostringstream& o, Node* n, const std::string& path) {
   o << "\"id\":" << n->id << ",\"name\":" << Str(n->name) << ",\"path\":" << Str(path)
@@ -87,6 +96,7 @@ void ItemFields(std::ostringstream& o, Node* n, const std::string& path) {
     << ",\"protected\":" << Bool(n->isMount || IsProtected(path));
   std::string w = DeleteWarning(path);
   if (!w.empty()) o << ",\"warn\":" << Str(w);
+  GameFields(o, n, path);
 }
 
 // Chart rings: only what is big enough to see, a few levels deep.
@@ -98,6 +108,10 @@ void Rings(std::ostringstream& o, Node* n, int depth, uint64_t min_size) {
     if (count++) o << ",";
     o << "{\"id\":" << c->id << ",\"name\":" << Str(c->name) << ",\"size\":" << c->size
       << ",\"dir\":" << Bool(c->isDir);
+    if (c->isDir && IsTitleId(c->name)) {
+      GameInfo gi = LookupGame(c->name, c->path());
+      if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
+    }
     if (depth > 1 && c->isDir && !c->isMount && !c->children.empty()) {
       o << ",\"kids\":";
       Rings(o, c, depth - 1, min_size);
@@ -118,8 +132,14 @@ std::string NodeJson(Node* n) {
   for (Node* a = n; a; a = a->parent) chain.push_back(a);
   std::reverse(chain.begin(), chain.end());
   o << ",\"crumbs\":[";
-  for (size_t i = 0; i < chain.size(); i++)
-    o << (i ? "," : "") << "{\"id\":" << chain[i]->id << ",\"name\":" << Str(chain[i]->name) << "}";
+  for (size_t i = 0; i < chain.size(); i++) {
+    o << (i ? "," : "") << "{\"id\":" << chain[i]->id << ",\"name\":" << Str(chain[i]->name);
+    if (i && IsTitleId(chain[i]->name)) {
+      GameInfo gi = LookupGame(chain[i]->name, chain[i]->path());
+      if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
+    }
+    o << "}";
+  }
   o << "]";
   // Every child for the list (capped for giant folders).
   o << ",\"children\":[";
@@ -302,6 +322,24 @@ void ApiHandle(const Request& req, Response& res) {
     return;
   }
 
+  if (p == "/api/icon") {
+    // Only by title ID, so this never serves an arbitrary file.
+    auto it = req.query.find("id");
+    std::string id = it == req.query.end() ? "" : it->second;
+    std::string icon = IsTitleId(id) ? LookupGame(id, "").icon : "";
+    std::ifstream f(icon, std::ios::binary);
+    if (icon.empty() || !f) {
+      Error(res, 404, "no icon");
+      return;
+    }
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    res.type = "image/png";
+    res.cache = "max-age=86400";
+    res.body = ss.str();
+    return;
+  }
+
   std::lock_guard<std::mutex> lock(g.mu);
   PollLocked();
 
@@ -346,6 +384,7 @@ void ApiHandle(const Request& req, Response& res) {
       return;
     }
     g.storage = s;
+    ClearGameCache();
     g.scanner = std::make_unique<Scanner>();
     g.scanner->Start(s.path, SkipList());
     g.phase = Phase::Scanning;

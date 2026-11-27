@@ -193,10 +193,10 @@ static void* Connection(void* arg) {
                          "HTTP/1.1 %d %s\r\n"
                          "Content-Type: %s\r\n"
                          "Content-Length: %zu\r\n"
-                         "Cache-Control: no-store\r\n"
+                         "Cache-Control: %s\r\n"
                          "Access-Control-Allow-Origin: *\r\n"
                          "Connection: close\r\n\r\n",
-                         res.status, Reason(res.status), res.type.c_str(), size);
+                         res.status, Reason(res.status), res.type.c_str(), size, res.cache.c_str());
   if (SendAll(fd, header, (size_t)hn) && req.method != "HEAD") SendAll(fd, data, size);
   shutdown(fd, SHUT_WR);
   close(fd);

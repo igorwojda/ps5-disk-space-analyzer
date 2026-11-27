@@ -67,6 +67,7 @@ configure_file(${GEN}/web_assets_table.cpp.in ${GEN}/web_assets_table.cpp COPYON
 add_executable(disk-space-analyzer
   src/main.cpp
   src/api.cpp
+  src/games.cpp
   src/http.cpp
   src/launcher.cpp
   src/platform.cpp

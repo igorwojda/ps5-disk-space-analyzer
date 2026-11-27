@@ -862,7 +862,7 @@ function buildChart(root, flat) {
       let r0 = R0;
       for (let i = 0; i < depth; i++) r0 += RING[i];
       const ch = chain.concat(c.id);
-      chart.segs.push({ id: c.id, name: c.name, size: c.size, dir: c.dir, hasKids: !!(c.kids && c.kids.length),
+      chart.segs.push({ id: c.id, name: c.name, title: c.title, size: c.size, dir: c.dir, hasKids: !!(c.kids && c.kids.length),
                         a0: a, a1: a + span, r0, r1: r0 + RING[depth], color, chain: ch });
       if (depth === 0) chart.colors.set(c.id, color);
       if (c.kids) lay(c.kids, a, a + span, depth + 1, h, ch, c.size);
@@ -1001,22 +1001,30 @@ function checkbox(item, i) {
   return `<div class="chk" data-act="check" data-i="${i}">${icon}</div>`;
 }
 
+function iconHtml(item) {
+  if (item.icon) return `<img src="/api/icon?id=${encodeURIComponent(item.name)}" alt="">`;
+  return item.dir ? ICON.folder : ICON.file;
+}
+
 function row(item, i, focused, style, parentSize) {
   const big = item.size >= 1e9;
   let mid, sub = '';
   if (style === 0) {
     const frac = parentSize ? item.size / parentSize : 0;
     const color = focused ? '#fff' : chart.colors.get(item.id) || (item.dir ? '#6fb1ff' : '#b9cce4');
+    // A game folder keeps its name; the game's name goes on a smaller line below.
     mid = `<div class="name ellipsis">${esc(item.name)}</div>
-      <div class="rbar"><i style="width:${(frac * 100).toFixed(2)}%;background:${color}"></i></div>`;
+      ${item.title ? `<div class="game ellipsis">${esc(item.title)}</div>` : ''}<div class="rbar"><i style="width:${(frac * 100).toFixed(2)}%;background:${color}"></i></div>`;
     sub = item.mount ? 'volume' : item.error ? 'partly unreadable' : fmtPct(frac);
   } else {
     const folder = style === 1 ? item.folder : item.path.replace(/\/[^/]*$/, '') || '/';
-    mid = `<div class="name ellipsis">${esc(item.name)}</div><div class="folder ellipsis">${esc(shortPath(folder))}</div>`;
+    const where = (item.title ? item.title + ' · ' : '') + shortPath(folder);
+    mid = `<div class="name ellipsis">${esc(item.name)}</div><div class="folder ellipsis">${esc(where)}</div>`;
     if (item.dir) sub = fmtCount(item.files) + ' files';
   }
-  return `<div class="row${focused ? ' focus' : ''}" data-act="row" data-i="${i}">
-    ${checkbox(item, i)}<div class="ico">${item.dir ? ICON.folder : ICON.file}</div>
+  const game = style === 0 && item.title ? ' game-row' : '';
+  return `<div class="row${focused ? ' focus' : ''}${game}" data-act="row" data-i="${i}">
+    ${checkbox(item, i)}<div class="ico">${iconHtml(item)}</div>
     <div class="mid">${mid}</div>
     <div class="right"><div class="size${big ? ' big' : ''}">${fmtSize(item.size)}</div><div class="sub">${esc(sub)}</div></div>
   </div>`;
@@ -1041,7 +1049,8 @@ function renderBrowse() {
   if (S.tab === 0 && S.node) {
     const n = S.node;
     const title = n.id === S.rootId ? st.name : n.name;
-    h += `<div class="abs panel-title ellipsis">${esc(title)}</div>
+    const game = n.title ? ` <span class="tid">${esc(n.title)}</span>` : '';
+    h += `<div class="abs panel-title ellipsis">${esc(title)}${game}</div>
       <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div><div class="abs rows">`;
     for (let i = S.scroll; i < n.children.length && i < S.scroll + VIS; i++)
       h += row(n.children[i], i, i === S.focus, 0, n.size);
@@ -1067,10 +1076,11 @@ function renderBrowse() {
     const f = focusedItem();
     const info = S.hover || f || croot;
     const name = info.id === S.rootId ? st.name : info.name;
+    const game = info.title ? `<div class="g ellipsis">${esc(info.title)}</div>` : '';
     let p;
     if (info !== croot && croot.size) p = fmtPct(info.size / croot.size) + (S.tab === 1 ? ' of storage' : ' of folder');
     else p = fmtCount(croot.files) + ' files';
-    h += `<div class="abs center" data-act="center"><div class="n ellipsis">${esc(name)}</div>
+    h += `<div class="abs center" data-act="center"><div class="n ellipsis">${esc(name)}</div>${game}
       <div class="s">${fmtSize(info.size)}</div><div class="p">${p}</div></div>`;
   }
 
