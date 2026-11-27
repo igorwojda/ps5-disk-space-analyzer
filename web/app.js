@@ -938,7 +938,7 @@ async function openExport(path) {
   const focus = Math.max(0, items.findIndex((x) => x[1] === 'paths=' + encodeURIComponent(path)));
   items.push(['Cancel', null]);
   showDialog({
-    title: 'Export report',
+    title: 'Export Report',
     lines: ['Choose what the report covers. The drives are scanned first; a full drive takes a few minutes.'],
     vertical: true,
     buttons: items.map((x) => x[0]),
@@ -1030,7 +1030,7 @@ async function saveReport(t) {
 
 function openMenu() {
   const items = [['Refresh (rescan ' + (S.storage ? S.storage.name : '') + ')', () => refreshScan()],
-                 ['Export report', () => openExport(S.storage ? S.storage.path : '')]];
+                 ['Export Report', () => openExport(S.storage ? S.storage.path : '')]];
   if (S.clip) {
     const n = fmtCount(S.clip.length);
     const move = S.clipMode === 'move';
@@ -1055,7 +1055,7 @@ function openMenu() {
 function openHomeMenu() {
   const items = [['Refresh storage list', () => loadStorages().then(() => { render(); toast('Storage list refreshed'); })]];
   const f = S.storages[S.hfocus];
-  items.push(['Export report', () => openExport(f ? f.path : '')]);
+  items.push(['Export Report', () => openExport(f ? f.path : '')]);
   if (S.clip) items.push([`Cancel ${S.clipMode === 'move' ? 'move' : 'cut'} (${fmtCount(S.clip.length)} items)`, cancelCut]);
   items.push(['Settings', openSettings], ['Close', null]);
   showDialog({
@@ -1748,7 +1748,7 @@ function renderHome() {
   let h = `<div class="abs home-title">Disk Space Analyzer</div>
     <div class="abs home-sub">Choose a storage to scan. Find what takes space, select it, clean it up.</div>
     <div class="abs home-actions">
-      <div class="home-btn" data-act="hint" data-a="mark">${GLYPH.square}${ICON.report}<span>Export report</span></div>
+      <div class="home-btn" data-act="hint" data-a="mark">${GLYPH.square}${ICON.report}<span>Export Report</span></div>
       <div class="home-btn" data-act="hint" data-a="review">${GLYPH.triangle}${ICON.gear}<span>Settings</span></div>
     </div>
     <div class="abs cards">`;
@@ -1764,7 +1764,7 @@ function renderHome() {
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  let hints = hint('cross', 'Scan', 'confirm') + hint('square', 'Export report', 'mark') +
+  let hints = hint('cross', 'Scan', 'confirm') + hint('square', 'Export Report', 'mark') +
               hint('triangle', 'Settings', 'review') + hint('circle', 'Close');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
