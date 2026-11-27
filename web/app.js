@@ -5,8 +5,9 @@
 // all of them, the console scans them (reporting screen), and the HTML file
 // with every folder and file is downloaded or saved on a drive. Cut (review screen or menu) keeps the items; Triangle (or the menu)
 // pastes them into the open folder. Move to sends them to another storage.
-// Browse has three tabs: Folders, Biggest Files, Games (each game's folders on
-// every volume, added up).
+// Browse has up to four tabs: Folders, Biggest Files, Games and Apps (each
+// title's folders on every volume, added up). Games and Apps show only when the
+// scanned storage holds a folder of one.
 //
 // Input, all mapped to the same actions:
 //   D-pad / arrow keys      move focus          Cross / Enter      open, confirm
@@ -261,10 +262,18 @@ function focusedItem() {
 }
 
 // Games (2) and Apps (3) are the same view over a different part of the list.
-const TABS = 4;
 function isGamesTab(t = S.tab) { return t === 2 || t === 3; }
 function tabList(t) { return S.allGames.filter((g) => (g.akind === 'game') === (t === 2)); }
 const tabWord = (games, apps) => (S.gkind === 3 ? apps : games);
+
+// Games and Apps show only when one of their titles has a folder on the scanned
+// storage. While the titles are still being counted the open tab stays.
+function hasTab(t) {
+  if (!isGamesTab(t)) return true;
+  if (t === S.tab && S.games !== 'ready') return true;
+  return S.allGames.some((g) => (g.akind === 'game') === (t === 2) && g.parts.some((p) => p.id != null));
+}
+function shownTabs() { return [0, 1, 2, 3].filter(hasTab); }
 
 // Switch tabs; between Games and Apps each keeps its own open title and focus.
 function setTab(t) {
@@ -362,6 +371,7 @@ async function loadGames() {
   clearTimeout(gamesTimer);
   let r;
   try { r = await api('/api/games'); } catch (e) { gamesTimer = setTimeout(loadGames, 2000); return; }
+  const tabsBefore = shownTabs().join();
   S.games = r.state;
   S.allGames = r.games.map(gameItem);
   S.gameList = tabList(S.gkind);
@@ -374,7 +384,9 @@ async function loadGames() {
   clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
   if (gamesPlace) await restoreGames(r.state !== 'counting');
   if (r.state === 'counting') gamesTimer = setTimeout(loadGames, 1000);
-  if (S.screen === 'browse' && isGamesTab()) render();
+  // The open tab has nothing left on this storage: back to Folders.
+  if (!hasTab(S.tab)) { S.tab = 0; S.mfocus = -1; S.hover = null; }
+  if (S.screen === 'browse' && (isGamesTab() || shownTabs().join() !== tabsBefore)) render();
 }
 
 async function startScan(storage) {
@@ -421,6 +433,7 @@ async function enterBrowse(st, place) {
   S.gfocus = S.gscroll = 0;
   const back = place && place.storage === S.storage.path ? place : null;
   S.gsaved = {};
+  S.games = 'counting';  // the scan just ended, so the titles are counted again
   S.gkind = back && back.tab === 3 ? 3 : 2;
   S.gameList = tabList(S.gkind);
   gamesPlace = back && back.gid ? back : null;
@@ -428,6 +441,7 @@ async function enterBrowse(st, place) {
   await loadBiggest();
   if (back) {
     S.tab = back.tab || 0;
+    if (!hasTab(S.tab)) S.tab = 0;  // its titles are gone from this storage
     const i = back.bpath ? S.biggest.findIndex((x) => x.path === back.bpath) : -1;
     if (i >= 0) { S.bfocus = i; S.bscroll = Math.max(0, i - (VIS >> 1)); clampList('bfocus', 'bscroll', S.biggest.length); }
     await openPath(back.path, back.focus);
@@ -1300,7 +1314,11 @@ function homeInput(a) {
 }
 
 function browseInput(a) {
-  if (a === 'tabprev' || a === 'tabnext') { setTab((S.tab + (a === 'tabnext' ? 1 : TABS - 1)) % TABS); S.hover = null; render(); return; }
+  if (a === 'tabprev' || a === 'tabnext') {
+    const t = shownTabs(), n = t.length;
+    setTab(t[(t.indexOf(S.tab) + (a === 'tabnext' ? 1 : n - 1)) % n]);
+    S.hover = null; render(); return;
+  }
   if (a === 'menu') { openMenu(); return; }
   if (a === 'review') { if (S.clip) pasteHere(); else openReview(); return; }
   if (S.mfocus >= 0) { menuInput(a); return; }
@@ -1818,11 +1836,9 @@ function header(title, sub, tabs) {
     <div class="abs hdr-title ellipsis">${esc(title)}</div>
     <div class="abs hdr-sub ellipsis">${esc(sub)}</div>`;
   if (tabs) {
+    const names = ['Folders', 'Biggest Files', 'Games', 'Apps'];
     h += `<div class="abs tabs">${GLYPH.l1}<div class="track">
-      <div class="tab${S.tab === 0 ? ' on' : ''}" data-act="tab" data-i="0">Folders</div>
-      <div class="tab${S.tab === 1 ? ' on' : ''}" data-act="tab" data-i="1">Biggest Files</div>
-      <div class="tab${S.tab === 2 ? ' on' : ''}" data-act="tab" data-i="2">Games</div>
-      <div class="tab${S.tab === 3 ? ' on' : ''}" data-act="tab" data-i="3">Apps</div>
+      ${shownTabs().map((t) => `<div class="tab${S.tab === t ? ' on' : ''}" data-act="tab" data-i="${t}">${names[t]}</div>`).join('')}
       </div>${GLYPH.r1}</div>`;
   }
   if (st && st.total) {
