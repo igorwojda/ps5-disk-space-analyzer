@@ -535,6 +535,11 @@ function act(el) {
     case 'seg': {
       const s = chart.segs[i];
       if (!s) break;
+      if (S.tab === 1) {
+        const j = S.biggest.findIndex((c) => c.id === s.id);
+        if (j >= 0) { S.bfocus = j; reveal(S.biggest[j].id, S.biggest[j].parentId); }
+        break;
+      }
       if (s.dir && s.hasKids) { S.tab = 0; openNode(s.id); }
       else reveal(s.id, s.chain.length > 1 ? s.chain[s.chain.length - 2] : chart.rootId);
       break;
@@ -562,10 +567,13 @@ function hover(el) {
     const s = chart.segs[i];
     if (S.hover !== s) {
       S.hover = s;
-      // A segment of the current folder also moves the list focus.
-      if (S.tab === 0 && S.node && s && s.chain.length === 1) {
-        const j = S.node.children.findIndex((c) => c.id === s.id);
+      // A segment selects its list item (or the list item it lives in) and scrolls to it.
+      if (s && S.tab === 0 && S.node) {
+        const j = S.node.children.findIndex((c) => c.id === s.chain[0]);
         if (j >= 0) { S.focus = j; clampList('focus', 'scroll', S.node.children.length); }
+      } else if (s && S.tab === 1) {
+        const j = S.biggest.findIndex((c) => c.id === s.id);
+        if (j >= 0) { S.bfocus = j; clampList('bfocus', 'bscroll', S.biggest.length); }
       }
       changed = true;
     }
@@ -736,8 +744,9 @@ function arcPath(r0, r1, a0, a1) {
   return `M${pt(r1, a0)}A${r1},${r1} 0 ${large} 1 ${pt(r1, a1)}L${pt(r0, a1)}A${r0},${r0} 0 ${large} 0 ${pt(r0, a0)}Z`;
 }
 
-function buildChart(root) {
-  const key = root.id + ':' + root.size + ':' + S.resultSeq;
+// flat: plain files (Biggest Files), coloured like folders.
+function buildChart(root, flat) {
+  const key = root.id + ':' + root.size + ':' + S.resultSeq + ':' + root.rings.length;
   if (chart.key === key && chart.el) return;
   chart.key = key;
   chart.rootId = root.id;
@@ -751,7 +760,7 @@ function buildChart(root) {
       const span = (a1 - a0) * c.size / parentSize;
       if (span < 0.008) break;
       const h = depth === 0 ? (30 + 300 * a / TAU) % 360 : hue;
-      const color = c.dir ? `hsl(${h.toFixed(0)},${92 - depth * 12}%,${52 + depth * 7}%)`
+      const color = c.dir || flat ? `hsl(${h.toFixed(0)},${92 - depth * 12}%,${52 + depth * 7}%)`
                           : `hsl(${h.toFixed(0)},30%,${82 - depth * 2}%)`;
       let r0 = R0;
       for (let i = 0; i < depth; i++) r0 += RING[i];
@@ -817,7 +826,7 @@ function render() {
     const f = focusedItem();
     let chain = null;
     if (S.hover) chain = S.hover.chain;
-    else if (f) chain = S.tab === 1 ? f.chain : [f.id];
+    else if (f) chain = [f.id];
     lightChart(chain || []);
   }
   renderDialog();
@@ -950,7 +959,8 @@ function renderBrowse() {
     h += '</div>';
     if (!S.biggest.length) h += '<div class="abs empty">No files</div>';
     h += scrollbar(S.bscroll, S.biggest.length);
-    if (S.rootNode) buildChart(S.rootNode);
+    const total = S.biggest.reduce((t, b) => t + b.size, 0);
+    buildChart({ id: -2, size: total, rings: S.biggest.map((b) => ({ id: b.id, name: b.name, size: b.size })) }, true);
   }
 
   // Center disc: what is under focus, relative to the chart root.
