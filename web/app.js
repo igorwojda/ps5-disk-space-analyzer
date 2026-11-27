@@ -1866,7 +1866,7 @@ function iconHtml(item) {
 // Kinds of data in a game row, in a grid of two columns of three lines filled
 // column by column: game files first, then the player's own data and the rest.
 const GAME_FILES = ['Game', 'Game dump', 'PS5 title', 'Update', 'Add-ons', 'Downloads', 'Install data'];
-const KIND_DOT = { Saves: '#5be0b5', Captures: '#f0a0d8', Metadata: '#8fa3bb', Other: '#8fa3bb' };
+const KIND_DOT = { Saves: '#5be0b5', Captures: '#f0a0d8', License: '#f2c46d', Metadata: '#8fa3bb', Other: '#8fa3bb' };
 
 function kindGrid(kinds) {
   if (kinds.length > 6) {  // six lines at most: fold the smallest into the last

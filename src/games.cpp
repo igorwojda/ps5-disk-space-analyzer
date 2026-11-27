@@ -252,15 +252,35 @@ std::string EmbeddedGameId(const std::string& n) {
 
 }  // namespace
 
+namespace {
+
+// The kind of data a system folder holds, whatever the entry inside is named,
+// or "" outside those folders.
+std::string AreaCategory(const std::vector<std::string>& seg) {
+  for (size_t i = 0; i + 1 < seg.size(); i++) {
+    if (seg[i] == "av_contents") return "Captures";
+    // savedata_prospero_for_cloud/sync/<ID>.dat marks a cloud save.
+    if (seg[i].compare(0, 8, "savedata") == 0 || seg[i] == "np_cloud_save") return "Saves";
+    if (seg[i] == "appmeta") return "Metadata";
+    if (seg[i] == "license") return "License";  // /user/home/<user>/license/EP9000-PPSA15508_00.rif
+    if (seg[i] == "playgo") return "Install data";  // /user/playgo/app/EP9000-CUSA00207_00-...
+  }
+  return "";
+}
+
+}  // namespace
+
+std::string EmbeddedIdCategory(const std::string& path) {
+  std::string area = AreaCategory(Segments(path));
+  return area.empty() ? "Game dump" : area;
+}
+
 std::string GameCategory(const std::string& path) {
   std::vector<std::string> seg = Segments(path);
   if (seg.size() < 2) return "Other";
   const std::string& parent = seg[seg.size() - 2];
-  for (size_t i = 0; i + 1 < seg.size(); i++) {
-    if (seg[i] == "av_contents") return "Captures";
-    if (seg[i].compare(0, 8, "savedata") == 0 || seg[i] == "np_cloud_save") return "Saves";
-    if (seg[i] == "appmeta") return "Metadata";
-  }
+  std::string area = AreaCategory(seg);
+  if (!area.empty()) return area;
   // Playden's PS5 title for a game: what starts it, not its files.
   const std::string& name = seg.back();
   if ((parent == "app" || parent == "homebrew") && name.size() == 9 && name.compare(0, 6, "FAKE78") == 0)
@@ -351,8 +371,7 @@ void GameScanner::Find(const std::string& dir, const GameRoot& root, int depth, 
       GamePart part;
       part.category = known != named_.end() ? known->second.category
                       : id == nm ? GameCategory(path)
-                      : path.find("/playgo/") != std::string::npos ? "Install data"  // EP9000-CUSA00207_00-...
-                      : "Game dump";
+                      : EmbeddedIdCategory(path);
       part.path = path;
       part.volume = root.volume;
       part.size = DiskBytes(st);

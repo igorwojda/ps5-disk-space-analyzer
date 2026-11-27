@@ -91,3 +91,7 @@ class GameScanner {
 
 // What a folder holding a title ID's data is for, from where it sits.
 std::string GameCategory(const std::string& path);
+// The category of an entry whose name only contains a title ID
+// ("EP9000-PPSA15508_00.rif", "PPSA02100-app"): its system folder's kind of
+// data, else a game dump.
+std::string EmbeddedIdCategory(const std::string& path);
