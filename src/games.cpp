@@ -209,13 +209,22 @@ GameInfo LookupGame(const std::string& id, const std::string& folder) {
     if (info.title.empty()) {
       std::string json = ReadSmallFile(d + "/param.json");
       info.title = TitleFromParamJson(json);
-      if (!info.title.empty()) info.kind = AppKindFromParamJson(json);
+      if (!info.title.empty()) {
+        info.kind = AppKindFromParamJson(json);
+        info.platform = "PS5";
+      }
     }
-    if (info.title.empty()) info.title = TitleFromParamSfo(ReadSmallFile(d + "/param.sfo"));
+    if (info.title.empty()) {
+      info.title = TitleFromParamSfo(ReadSmallFile(d + "/param.sfo"));
+      if (!info.title.empty()) info.platform = "PS4";
+    }
     if (info.icon.empty() && IsFile(d + "/icon0.png")) info.icon = d + "/icon0.png";
     if (!info.title.empty() && !info.icon.empty()) break;
   }
   if (info.kind.empty()) info.kind = "game";
+  // No metadata: the title ID's prefix still tells the console it was made for.
+  if (info.platform.empty() && id.compare(0, 4, "PPSA") == 0) info.platform = "PS5";
+  if (info.platform.empty() && id.compare(0, 4, "CUSA") == 0) info.platform = "PS4";
   g_cache.emplace(id, info);
   return info;
 }

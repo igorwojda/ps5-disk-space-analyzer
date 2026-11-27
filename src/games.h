@@ -18,6 +18,7 @@ struct GameInfo {
   std::string title;  // "" when no metadata was found
   std::string icon;   // path of icon0.png, "" when none
   std::string kind;   // AppKindFromParamJson(), "game" without a param.json
+  std::string platform;  // "PS5" (param.json, PPSA), "PS4" (param.sfo, CUSA) or ""
 };
 
 // Looks the title up once and caches it. `folder` is the folder being shown,

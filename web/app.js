@@ -349,13 +349,19 @@ async function loadBiggest() {
 
 // A game's folders, shaped like list items so selection and review treat them
 // like any folder. `cid` is the chart's id for it.
-const APP_FILES = { app: 'PlayStation App', webapp: 'Web App' };
+// The install folder's label: "Game (PS5)", "App (PS4)", "App (Payload)".
+function installLabel(kind, platform) {
+  if (kind === 'webapp') return 'App (Payload)';
+  const what = kind === 'app' ? 'App' : 'Game';
+  return platform ? `${what} (${platform})` : what;
+}
 function gameItem(g) {
   const title = g.title || g.id;
   const kind = g.kind || 'game';
+  const gameFiles = installLabel(kind, g.platform);
   const parts = g.parts.map((p) => ({
     id: p.node != null ? p.node : null, parentId: p.parent != null ? p.parent : -1,
-    cid: 'p:' + p.path, gid: g.id, path: p.path, name: p.cat === 'Game' && APP_FILES[kind] || p.cat, title, volume: p.volume,
+    cid: 'p:' + p.path, gid: g.id, path: p.path, name: p.cat === 'Game' ? gameFiles : p.cat, title, volume: p.volume,
     size: p.size, files: p.files, dir: true, error: p.error, protected: p.protected, warn: p.warn,
     uninstall: p.uninstall, removedWith: p.removedWith,
   }));
@@ -1945,8 +1951,8 @@ function iconHtml(item) {
 // Kinds of data in a game row, in a grid of two columns of three lines filled
 // column by column: game files first, then the player's own data and the rest.
 // The title's own install folder comes first, whatever its size.
-const MAIN_FILES = ['Game', 'PlayStation App', 'Web App'];
-const GAME_FILES = ['Game', 'PlayStation App', 'Web App', 'Game dump', 'PS5 title', 'Update', 'Add-ons', 'Downloads', 'Install data'];
+const MAIN_FILES = ['Game', 'Game (PS5)', 'Game (PS4)', 'App', 'App (PS5)', 'App (PS4)', 'App (Payload)'];
+const GAME_FILES = [...MAIN_FILES, 'Game dump', 'PS5 title', 'Update', 'Add-ons', 'Downloads', 'Install data'];
 const KIND_DOT = { Saves: '#5be0b5', Captures: '#f0a0d8', License: '#f2c46d', Metadata: '#8fa3bb', Other: '#8fa3bb' };
 
 function kindGrid(kinds) {

@@ -327,12 +327,14 @@ footer p { margin: 4px 0; }
     const all = D.games.reduce((t, g) => t + g.size, 0);
     let s = HEAD('Share of all games', 'Size', 'Files') + '<div class="kids">';
     for (const g of D.games) {
-      const sub = (g.title ? g.id + ' · ' : '') + g.parts.map((p) => p.cat).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+      const what = g.kind === 'webapp' ? 'App (Payload)' : (g.kind === 'app' ? 'App' : 'Game') + (g.platform ? ` (${g.platform})` : '');
+      const cat = (p) => (p.cat === 'Game' ? what : p.cat);
+      const sub = (g.title ? g.id + ' · ' : '') + g.parts.map(cat).filter((v, i, a) => a.indexOf(v) === i).join(', ');
       s += `<div class="item"><div class="row dir" tabindex="0" role="button" aria-expanded="false">
         ${nameCell(ICON_DIR, g.title || g.id, sub, true)}${pctCell(all ? g.size / all : 0)}${sizeCell(g.size)}
         <div class="num cnt">${fmtCount(g.files)}</div></div><div class="kids" hidden>
         ${g.parts.map((p) => `<div class="item"><div class="row" style="padding-left:38px">
-          ${nameCell(ICON_DIR, p.cat, p.volume + ' · ' + p.path)}${pctCell(g.size ? p.size / g.size : 0)}${sizeCell(p.size)}
+          ${nameCell(ICON_DIR, cat(p), p.volume + ' · ' + p.path)}${pctCell(g.size ? p.size / g.size : 0)}${sizeCell(p.size)}
           <div class="num cnt">${fmtCount(p.files)}</div></div></div>`).join('')}</div></div>`;
     }
     s += '</div><div class="note">Everything each game uses on every storage: the game, updates, add-ons, saves, captures and more.' +

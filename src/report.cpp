@@ -159,6 +159,10 @@ void EmitGames(std::string& o, const std::vector<GameTotal>& games, const std::v
     JStr(o, gt.id);
     o += ",\"title\":";
     JStr(o, gi.title);
+    o += ",\"kind\":";
+    JStr(o, gi.kind);
+    o += ",\"platform\":";
+    JStr(o, gi.platform);
     o += ",\"size\":";
     Num(o, gt.size);
     o += ",\"files\":";
