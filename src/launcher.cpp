@@ -21,9 +21,9 @@
 
 #include "web_assets.h"
 
-#define TITLE_ID "SSAN00001"
+#define TITLE_ID "DSAN00002"
 // Tiles of earlier builds, removed if present.
-static const char* const kOldTitleIds[] = {"DSKA00001", "DSAN00001"};
+static const char* const kOldTitleIds[] = {"DSKA00001", "DSAN00001", "SSAN00001"};
 
 extern "C" {
 int sceAppInstUtilInitialize(void);
@@ -70,7 +70,7 @@ int InstallLauncher(unsigned short port) {
                 "  \"localizedParameters\": {\n"
                 "    \"defaultLanguage\": \"en-US\",\n"
                 "    \"en-US\": {\n"
-                "      \"titleName\": \"Storage Space Analyzer\"\n"
+                "      \"titleName\": \"Disk Space Analyzer\"\n"
                 "    }\n"
                 "  }\n"
                 "}\n",

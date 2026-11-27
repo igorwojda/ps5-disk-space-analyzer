@@ -16,8 +16,8 @@ void LogOpen() {
   // Log of builds named disk-analyzer.
   unlink("/data/disk-analyzer/disk-analyzer.log");
   rmdir("/data/disk-analyzer");
-  mkdir("/data/storage-analyzer", 0755);
-  g_log = std::fopen("/data/storage-analyzer/storage-analyzer.log", "w");
+  mkdir("/data/disk-space-analyzer", 0755);
+  g_log = std::fopen("/data/disk-space-analyzer/disk-space-analyzer.log", "w");
 #endif
 }
 
@@ -27,7 +27,7 @@ void Log(const char* fmt, ...) {
   va_start(ap, fmt);
   std::vsnprintf(buf, sizeof buf, fmt, ap);
   va_end(ap);
-  std::fprintf(stderr, "[storage-analyzer] %s\n", buf);
+  std::fprintf(stderr, "[disk-space-analyzer] %s\n", buf);
   if (g_log) {
     std::fprintf(g_log, "%ld %s\n", (long)std::time(nullptr), buf);
     std::fflush(g_log);  // keep the line if we crash right after

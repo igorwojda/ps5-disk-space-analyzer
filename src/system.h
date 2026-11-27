@@ -3,7 +3,7 @@
 #pragma once
 
 // Writes to stderr (websrv shows it with ?pipe=1) and to the log file
-// (/data/storage-analyzer/storage-analyzer.log on the PS5).
+// (/data/disk-space-analyzer/disk-space-analyzer.log on the PS5).
 void LogOpen();
 void Log(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 

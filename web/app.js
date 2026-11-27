@@ -1,4 +1,4 @@
-// Storage Space Analyzer web UI.
+// Disk Space Analyzer web UI.
 //
 // Screens: home (pick storage) -> scanning -> browse (select) -> review -> deleting.
 //
@@ -319,7 +319,7 @@ function openMenu() {
     title: 'Menu',
     vertical: true,
     buttons: ['Rescan ' + (S.storage ? S.storage.name : ''), 'Clear selection', 'Choose another storage',
-              'Stop Storage Space Analyzer', 'Close'],
+              'Stop Disk Space Analyzer', 'Close'],
     cancel: 4,
     onChoose: (i) => {
       if (i === 0 && S.storage) startScan(S.storage);
@@ -343,13 +343,13 @@ function leaveScan() {
 
 function stopPayload() {
   showDialog({
-    title: 'Stop Storage Space Analyzer?',
-    lines: ['The background payload stops. Send storage-analyzer.elf again to use the app.'],
+    title: 'Stop Disk Space Analyzer?',
+    lines: ['The background payload stops. Send disk-space-analyzer.elf again to use the app.'],
     buttons: ['Cancel', 'Stop'], cancel: 0,
     onChoose: (i) => {
       if (i !== 1) return;
       api('/api/quit', 'POST').catch(() => {});
-      document.body.innerHTML = '<p style="font:32px Lato,sans-serif;color:#eaf2ff;text-align:center;margin-top:40vh">Storage Space Analyzer stopped.</p>';
+      document.body.innerHTML = '<p style="font:32px Lato,sans-serif;color:#eaf2ff;text-align:center;margin-top:40vh">Disk Space Analyzer stopped.</p>';
     },
   });
 }
@@ -857,7 +857,7 @@ function header(title, sub, tabs) {
 }
 
 function renderHome() {
-  let h = `<div class="abs home-title">Storage Space Analyzer</div>
+  let h = `<div class="abs home-title">Disk Space Analyzer</div>
     <div class="abs home-sub">Choose a storage to scan. Find what takes space, select it, clean it up.</div>
     <div class="abs cards">`;
   S.storages.forEach((s, i) => {

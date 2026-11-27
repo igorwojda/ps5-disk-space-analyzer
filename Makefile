@@ -1,8 +1,8 @@
 # Convenience wrapper around CMake.
 #
 #   make toolchain  download the PS5 SDK + SDL2 libs into .toolchain (no sudo)
-#   make ps5        build build-ps5/storage-analyzer.elf
-#   make package    dist/storage-analyzer.elf
+#   make ps5        build build-ps5/disk-space-analyzer.elf
+#   make package    dist/disk-space-analyzer.elf
 #   make send       send it to elfldr: make send PS5_HOST=192.168.1.50
 #   make desktop    build the same server for macOS/Linux (development)
 #   make run        run it locally: http://localhost:8833/
@@ -24,7 +24,7 @@ ifeq ($(shell uname -s),Darwin)
   export LLVM_CONFIG
 endif
 
-ELF := build-ps5/storage-analyzer.elf
+ELF := build-ps5/disk-space-analyzer.elf
 
 .PHONY: toolchain ps5 package send desktop run clean
 
@@ -40,8 +40,8 @@ ps5:
 
 package: ps5
 	mkdir -p dist
-	cp $(ELF) dist/storage-analyzer.elf
-	@echo "dist/storage-analyzer.elf ready"
+	cp $(ELF) dist/disk-space-analyzer.elf
+	@echo "dist/disk-space-analyzer.elf ready"
 
 send: ps5
 	socat -t 99999999 - TCP:$(PS5_HOST):$(PS5_PORT) < $(ELF)
@@ -52,7 +52,7 @@ desktop:
 
 # Serves the UI from web/ so edits show up on reload.
 run: desktop
-	./build-desktop/storage-analyzer --web web
+	./build-desktop/disk-space-analyzer --web web
 
 clean:
 	rm -rf build-ps5 build-desktop dist

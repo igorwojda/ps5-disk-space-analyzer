@@ -1,9 +1,9 @@
-# Storage Space Analyzer for PS5
+# Disk Space Analyzer for PS5
 
 Find what takes space on a jailbroken PS5 and clean it up: **scan → select → clean up**.
 
-`storage-analyzer.elf` is a payload that runs in the background and serves a web
-UI. It adds a **Storage Space Analyzer** tile to the **Media** tab that opens the
+`disk-space-analyzer.elf` is a payload that runs in the background and serves a web
+UI. It adds a **Disk Space Analyzer** tile to the **Media** tab that opens the
 UI in the PS5 browser. The same UI, with every feature, works from a phone or
 PC on the same network: the bar at the bottom of the screen shows the app
 version and the address to open (`http://<ps5-ip>:8833/`).
@@ -20,10 +20,10 @@ version and the address to open (`http://<ps5-ip>:8833/`).
 
 ## Install
 
-1. Send `storage-analyzer.elf` to the console's ELF loader (port 9021):
-   `make send PS5_HOST=<ip>`, or `nc -q0 <ip> 9021 < storage-analyzer.elf`.
-2. A toast says "Storage Space Analyzer 1.0.0 is running" with the address.
-3. Open **Media → Storage Space Analyzer**, or browse to the address from the
+1. Send `disk-space-analyzer.elf` to the console's ELF loader (port 9021):
+   `make send PS5_HOST=<ip>`, or `nc -q0 <ip> 9021 < disk-space-analyzer.elf`.
+2. A toast says "Disk Space Analyzer 1.0.0-beta1 is running" with the address.
+3. Open **Media → Disk Space Analyzer**, or browse to the address from the
    toast (also shown in the bottom bar) on a computer or phone.
 
 Send the ELF again to update it: the new copy replaces the running one. The
@@ -70,7 +70,7 @@ also clickable with the cursor.
 
 ## Troubleshooting
 
-- **Log file:** `/data/storage-analyzer/storage-analyzer.log`.
+- **Log file:** `/data/disk-space-analyzer/disk-space-analyzer.log`.
 - **Tile missing:** the log says why (`launcher ...` lines). The UI still
   works at `http://<ps5-ip>:8833/`.
 - **Port 8833 busy:** the payload tries the next ports. The toast and the
@@ -82,7 +82,7 @@ Needs `cmake`, `clang` and `lld` (macOS: `brew install llvm lld cmake`).
 
 ```sh
 make toolchain   # PS5 payload SDK into .toolchain (~700 MB, no sudo)
-make package     # -> dist/storage-analyzer.elf
+make package     # -> dist/disk-space-analyzer.elf
 ```
 
 The version comes from `project(... VERSION x.y.z)` in `CMakeLists.txt`.
@@ -91,7 +91,7 @@ Development on macOS or Linux, using the same server code:
 
 ```sh
 make run                                   # http://localhost:8833/, UI served from web/
-./build-desktop/storage-analyzer ~/Downloads  # offer an extra folder to scan
+./build-desktop/disk-space-analyzer ~/Downloads  # offer an extra folder to scan
 ```
 
 ## Layout
@@ -103,7 +103,7 @@ make run                                   # http://localhost:8833/, UI served f
 | `src/api.*` | JSON API: version/address, storages, scan, folders, biggest files, delete |
 | `src/tree.*` | File tree, background scanner, background deleter |
 | `src/platform.*` | Storage list, free space, protected paths, warnings |
-| `src/launcher.*` | Media tile (`/user/app/SSAN00001`, category 65536, `deeplinkUri`) |
+| `src/launcher.*` | Media tile (`/user/app/DSAN00002`, category 65536, `deeplinkUri`) |
 | `src/system.*` | Log file and PS5 notifications |
 | `web/` | The UI: `index.html`, `app.css`, `app.js` (compiled into the ELF) |
 

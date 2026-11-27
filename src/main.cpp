@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Storage Space Analyzer: a payload that serves a web UI for finding and
+// Disk Space Analyzer: a payload that serves a web UI for finding and
 // deleting what takes space. On the PS5 it also adds a tile to the Media tab
 // that opens the UI in the console's browser.
 #include <signal.h>
@@ -23,9 +23,9 @@
 
 #include <cstdint>
 
-#define PROCESS_NAME "storage-analyzer.elf"
+#define PROCESS_NAME "disk-space-analyzer.elf"
 // Names of earlier builds, stopped as well when this one starts.
-static const char* const kOldNames[] = {"disk-analyzer.elf"};
+static const char* const kOldNames[] = {"disk-analyzer.elf", "storage-analyzer.elf"};
 
 // The kernel keeps a short thread name, so a long name comes back cut off.
 static bool SameName(const char* name, const char* tdname) {
@@ -99,7 +99,7 @@ int main(int argc, char* argv[]) {
 
   port = FindFreePort(port);
   if (!port) {
-    Notify("Storage Space Analyzer: no free network port");
+    Notify("Disk Space Analyzer: no free network port");
     return 1;
   }
   ApiInit(web_dir, extra, port);
@@ -108,9 +108,9 @@ int main(int argc, char* argv[]) {
   Log("version %s, %s", APP_VERSION, url.c_str());
 
   if (InstallLauncher(port) == 0) {
-    Notify("Storage Space Analyzer %s is running\nOpen it from Media, or %s", APP_VERSION, url.c_str());
+    Notify("Disk Space Analyzer %s is running\nOpen it from Media, or %s", APP_VERSION, url.c_str());
   } else {
-    Notify("Storage Space Analyzer %s is running on %s\n(the Media tile could not be added, see log)",
+    Notify("Disk Space Analyzer %s is running on %s\n(the Media tile could not be added, see log)",
            APP_VERSION, url.c_str());
   }
 #if !defined(__PROSPERO__)
