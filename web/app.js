@@ -97,8 +97,6 @@ const SETTINGS = [
     show: (v) => Math.round(v * 100) + '%' },
   { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
     show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
-  { key: 'rescanOnReturn', label: 'Rescan when returning', values: [true, false], def: true,
-    show: (v) => (v ? 'On' : 'Off') },
 ];
 const SETTINGS_KEY = 'dsa.settings';
 const settings = {};
@@ -481,7 +479,7 @@ async function refreshScan(place = currentPlace()) {
 // Back in the app after using another one: what was on screen may be stale.
 let hiddenAt = 0;
 function onReturn() {
-  if ((S.screen === 'browse' || S.screen === 'review') && settings.rescanOnReturn) refreshScan();
+  if (S.screen === 'browse' || S.screen === 'review') refreshScan();
   else if (S.screen === 'home') loadStorages().then(render);
 }
 document.addEventListener('visibilitychange', () => {
@@ -2219,7 +2217,7 @@ async function start() {
     S.storage = st.storage;
     let place = loadPlace();
     if (!place || place.storage !== st.storage.path) place = { storage: st.storage.path, path: '', tab: 0, focus: '' };
-    if (!settings.rescanOnReturn || !(await refreshScan(place))) await enterBrowse(st, place);
+    if (!(await refreshScan(place))) await enterBrowse(st, place);
   } else {
     render();
   }
