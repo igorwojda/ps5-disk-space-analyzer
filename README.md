@@ -41,8 +41,8 @@ You need a jailbroken PS5 with an ELF loader.
 The app runs until you restart the console. After a restart, send the file
 again (or add it to your autoload). The Media tile stays installed.
 
-To use it from your phone or PC, open the address shown at the bottom of the
-app, such as `http://192.168.1.20:8833/`.
+To use it from your phone or PC, open the **Remote Management** address shown
+at the bottom of the app, such as `http://192.168.1.20:8833/`.
 
 ## Build from source
 
