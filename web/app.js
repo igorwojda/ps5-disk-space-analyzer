@@ -1983,6 +1983,16 @@ function shortPath(p) {
   return p;
 }
 
+// A list's rows: the vis that fit, plus the next one peeking in at the bottom.
+// At the end of a long list the rows sit at the bottom and the one before peeks in at the top.
+function listRows(list, scroll, vis, draw, menu = true) {
+  const end = list.length > vis && scroll >= list.length - vis;
+  const from = end ? scroll - 1 : scroll, to = Math.min(list.length, scroll + vis + 1);
+  let h = `<div class="abs rows${menu ? ' m' : ''}${end ? ' end' : ''}">`;
+  for (let i = from; i < to; i++) h += draw(list[i], i);
+  return h + '</div>';
+}
+
 function scrollbar(first, total, vis = VIS, review = false) {
   if (total <= vis) return '';
   const h = review ? ROWS_H : LIST_H, th = Math.max(40, h * vis / total), ty = (h - th) * first / Math.max(1, total - vis);
@@ -1996,10 +2006,8 @@ function renderBrowse() {
     h += folderPanel(S.node, S.focus, S.scroll);
   } else if (S.tab === 1) {
     h += `<div class="abs panel-title">Biggest files</div>
-      <div class="abs panel-meta">Top ${fmtCount(S.biggest.length)} on this storage</div><div class="abs rows m">`;
-    for (let i = S.bscroll; i < S.biggest.length && i < S.bscroll + VIS; i++)
-      h += row(S.biggest[i], i, S.mfocus < 0 && i === S.bfocus, 1, 0);
-    h += '</div>';
+      <div class="abs panel-meta">Top ${fmtCount(S.biggest.length)} on this storage</div>`;
+    h += listRows(S.biggest, S.bscroll, VIS, (x, i) => row(x, i, S.mfocus < 0 && i === S.bfocus, 1, 0));
     if (!S.biggest.length) h += '<div class="abs empty">No files</div>';
     h += scrollbar(S.bscroll, S.biggest.length);
     const total = S.biggest.reduce((t, b) => t + b.size, 0);
@@ -2100,10 +2108,8 @@ function nodeName(n) {
 function folderPanel(n, focus, scroll) {
   const game = n.title ? ` <span class="tid">${esc(n.title)}</span>` : '';
   let h = `<div class="abs panel-title ellipsis">${esc(nodeName(n))}${game}</div>
-    <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div><div class="abs rows m">`;
-  for (let i = scroll; i < n.children.length && i < scroll + VIS; i++)
-    h += row(n.children[i], i, S.mfocus < 0 && i === focus, 0, n.size);
-  h += '</div>';
+    <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div>`;
+  h += listRows(n.children, scroll, VIS, (x, i) => row(x, i, S.mfocus < 0 && i === focus, 0, n.size));
   if (!n.children.length) h += '<div class="abs empty">Empty folder</div>';
   h += scrollbar(scroll, n.children.length);
   buildChart(n);
@@ -2122,21 +2128,16 @@ function renderGames() {
   const g = S.game;
   if (g) {
     h = `<div class="abs panel-title ellipsis">${esc(g.name)}${g.sub ? ` <span class="tid">${esc(g.sub)}</span>` : ''}</div>
-      <div class="abs panel-meta">${fmtSize(g.size)} &middot; ${fmtCount(g.files)} files</div><div class="abs rows m">`;
-    for (let i = S.pscroll; i < g.parts.length && i < S.pscroll + PVIS; i++)
-      h += row(g.parts[i], i, S.mfocus < 0 && i === S.pfocus, 4, g.size);
-    h += '</div>' + scrollbar(S.pscroll, g.parts.length, PVIS);
+      <div class="abs panel-meta">${fmtSize(g.size)} &middot; ${fmtCount(g.files)} files</div>`;
+    h += listRows(g.parts, S.pscroll, PVIS, (x, i) => row(x, i, S.mfocus < 0 && i === S.pfocus, 4, g.size)) + scrollbar(S.pscroll, g.parts.length, PVIS);
     buildChart({ id: g.cid, size: g.size, rings: g.parts.map((p) => ({ id: p.cid, name: p.name, title: g.name, size: p.size, dir: true })) });
     return h;
   }
   const all = gamesRoot();
   const counting = S.games === 'counting';
   h = `<div class="abs panel-title">${tabWord('Games', 'Apps')}</div>
-    <div class="abs panel-meta">${counting ? 'Counting&hellip;' : `${fmtCount(S.gameList.length)} ${tabWord('games', 'apps')} &middot; ${fmtSize(all.size)}`}</div>
-    <div class="abs rows m">`;
-  for (let i = S.gscroll; i < S.gameList.length && i < S.gscroll + GVIS; i++)
-    h += row(S.gameList[i], i, S.mfocus < 0 && i === S.gfocus, 3, all.size);
-  h += '</div>' + scrollbar(S.gscroll, S.gameList.length, GVIS);
+    <div class="abs panel-meta">${counting ? 'Counting&hellip;' : `${fmtCount(S.gameList.length)} ${tabWord('games', 'apps')} &middot; ${fmtSize(all.size)}`}</div>`;
+  h += listRows(S.gameList, S.gscroll, GVIS, (x, i) => row(x, i, S.mfocus < 0 && i === S.gfocus, 3, all.size)) + scrollbar(S.gscroll, S.gameList.length, GVIS);
   if (!S.gameList.length) h += `<div class="abs empty">${counting ? 'Counting data on all storages&hellip;' : tabWord('No games found', 'No apps found')}</div>`;
   if (S.gameList.length) {
     buildChart({ id: 'games', size: all.size, rings: S.gameList.map((x) => ({
@@ -2155,10 +2156,8 @@ function renderReview() {
   let h = header('Review & clean', (st.name || '') + ' · ' + (st.path || ''), false) +
     `<div class="abs panel"></div><div class="abs summary"></div>
     <div class="abs panel-title">Selected items</div>
-    <div class="abs panel-meta">${fmtCount(list.length)} items</div><div class="abs rows">`;
-  for (let i = S.rscroll; i < list.length && i < S.rscroll + RVIS; i++)
-    h += row(list[i], i, S.rbtn < 0 && i === S.rfocus, 2, 0);
-  h += '</div>' + scrollbar(S.rscroll, list.length, RVIS, true);
+    <div class="abs panel-meta">${fmtCount(list.length)} items</div>`;
+  h += listRows(list, S.rscroll, RVIS, (x, i) => row(x, i, S.rbtn < 0 && i === S.rfocus, 2, 0), false) + scrollbar(S.rscroll, list.length, RVIS, true);
 
   const bytes = markedBytes();
   // A game being uninstalled takes its update, add-ons and home screen info
