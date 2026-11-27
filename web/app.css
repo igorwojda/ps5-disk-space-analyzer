@@ -95,7 +95,8 @@ svg { display: block; }
 .row .info { font-size: calc(24px * var(--fs)); line-height: 1.25; color: var(--info); }
 /* Games tab: a game with its cover and a line per kind of data. */
 .row.game-card { height: var(--row-game); }
-.row .cov { width: 146px; height: 146px; margin-right: 22px; flex: none;
+/* Sized from the row so smaller text sizes keep the gap between covers. */
+.row .cov { width: calc(var(--row-game) - 24px); height: calc(var(--row-game) - 24px); margin-right: 22px; flex: none;
             border-radius: 12px; overflow: hidden; background: rgba(255, 255, 255, .08);
             display: flex; align-items: center; justify-content: center; }
 .row .cov img { display: block; width: 100%; height: 100%; object-fit: cover; }
