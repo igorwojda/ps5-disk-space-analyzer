@@ -152,6 +152,11 @@ footer p { margin: 4px 0; }
     return parts.length ? base.replace(/\/$/, '') + '/' + parts.join('/') : base;
   }
 
+  // Games and apps (YouTube, payload tiles) are listed apart, as in the app.
+  const titles = D.games || [];
+  const isGame = (g) => (g.kind || 'game') === 'game';
+  const games = titles.filter(isGame), apps = titles.filter((g) => !isGame(g));
+
   // ---------------------------------------------------------------- header
   const usedOf = (d) => d.storage.total ? d.storage.total - d.storage.free : d.tree[1];
   const total = sum((d) => d.storage.total || 0), free = sum((d) => d.storage.free || 0);
@@ -166,7 +171,8 @@ footer p { margin: 4px 0; }
       ${card(fmtSize(scanned), 'found by the scan')}
       ${card(fmtCount(top[2]), 'files')}
       ${card(fmtCount(sum((d) => d.folders || 0)), 'folders')}
-      ${D.games && D.games.length ? card(fmtCount(D.games.length), 'games') : ''}
+      ${games.length ? card(fmtCount(games.length), games.length === 1 ? 'game' : 'games') : ''}
+      ${apps.length ? card(fmtCount(apps.length), apps.length === 1 ? 'app' : 'apps') : ''}
     </div>`;
 
   // Each drive's biggest top-level folders as parts of the whole drive.
@@ -190,7 +196,8 @@ footer p { margin: 4px 0; }
   h += `<section class="box usage"><h2>Where the space goes</h2>${drives.map(usageHtml).join('')}</section>`;
 
   const tabs = [['folders', multi ? 'Drives' : 'Folders'], ['files', 'Biggest files']];
-  if (D.games && D.games.length) tabs.push(['games', 'Games']);
+  if (games.length) tabs.push(['games', 'Games']);
+  if (apps.length) tabs.push(['apps', 'Apps']);
   h += `<nav>${tabs.map(([k, l], i) => `<button type="button" data-tab="${k}"${i ? '' : ' class="on"'}>${l}</button>`).join('')}
     <input type="search" id="q" placeholder="Search files and folders" aria-label="Search files and folders"></nav>
     <section class="box list" id="view"></section>`;
@@ -323,10 +330,11 @@ footer p { margin: 4px 0; }
       `<div class="note">The ${fmtCount(biggest.length)} biggest files on ${esc(multi ? title.replace(/^All/, 'all') : title)}.</div>`;
   }
 
-  function showGames() {
-    const all = D.games.reduce((t, g) => t + g.size, 0);
-    let s = HEAD('Share of all games', 'Size', 'Files') + '<div class="kids">';
-    for (const g of D.games) {
+  // The Games or the Apps tab: `list` is the titles, `word` "game" or "app".
+  function showTitles(list, word) {
+    const all = list.reduce((t, g) => t + g.size, 0);
+    let s = HEAD(`Share of all ${word}s`, 'Size', 'Files') + '<div class="kids">';
+    for (const g of list) {
       const what = g.kind === 'webapp' ? 'App (Payload)' : (g.kind === 'app' ? 'App' : 'Game') + (g.platform ? ` (${g.platform})` : '');
       const cat = (p) => (p.cat === 'Game' ? what : p.cat);
       const sub = (g.title ? g.id + ' · ' : '') + g.parts.map(cat).filter((v, i, a) => a.indexOf(v) === i).join(', ');
@@ -337,10 +345,12 @@ footer p { margin: 4px 0; }
           ${nameCell(ICON_DIR, cat(p), p.volume + ' · ' + p.path)}${pctCell(g.size ? p.size / g.size : 0)}${sizeCell(p.size)}
           <div class="num cnt">${fmtCount(p.files)}</div></div></div>`).join('')}</div></div>`;
     }
-    s += '</div><div class="note">Everything each game uses on every storage: the game, updates, add-ons, saves, captures and more.' +
-      (D.gamesReady ? '' : ' The games were still being counted when this report was made, so this list may be incomplete.') + '</div>';
+    s += `</div><div class="note">Everything each ${word} uses on every storage: the ${word}, updates, add-ons, saves, captures and more.` +
+      (D.gamesReady ? '' : ` The ${word}s were still being counted when this report was made, so this list may be incomplete.`) + '</div>';
     view.innerHTML = s;
   }
+  const showGames = () => showTitles(games, 'game');
+  const showApps = () => showTitles(apps, 'app');
 
   function showSearch(q) {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -358,7 +368,7 @@ footer p { margin: 4px 0; }
 
   // ---------------------------------------------------------------- tabs
   let tab = 'folders';
-  const SHOW = { folders: showFolders, files: showFiles, games: showGames };
+  const SHOW = { folders: showFolders, files: showFiles, games: showGames, apps: showApps };
   const q = document.getElementById('q');
   function update() {
     const s = q.value.trim();
