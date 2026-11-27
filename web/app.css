@@ -80,22 +80,22 @@ svg { display: block; }
 .center .s { font-size: 34px; font-weight: 700; margin: 4px 0; }
 .center .p { font-size: 20px; color: #cfe0f7; }
 
-.crumbs { left: 48px; top: 946px; width: 984px; font-size: 24px; color: var(--dim); }
+.crumbs { left: 48px; top: 942px; width: 984px; font-size: 24px; color: var(--dim); }
 .crumbs b { color: var(--text); }
 .crumbs span[data-act] { padding: 2px 0; }
 
 /* ---------------------------------------------------------------- hints */
 #hints {
-  position: absolute; left: 0; bottom: 34px; width: 1920px; height: 64px; background: rgba(0, 0, 0, .27);
+  position: absolute; left: 0; bottom: 42px; width: 1920px; height: 64px; background: rgba(0, 0, 0, .27);
   display: flex; align-items: center; padding: 0 40px; gap: 44px; font-size: 26px;
 }
 #hints:empty { display: none; }
 
 /* ---------------------------------------------------------------- status bar */
 #statusbar {
-  position: absolute; left: 0; bottom: 0; width: 1920px; height: 34px; background: rgba(0, 0, 0, .45);
+  position: absolute; left: 0; bottom: 0; width: 1920px; height: 42px; background: rgba(0, 0, 0, .45);
   display: flex; align-items: center; justify-content: space-between; padding: 0 40px;
-  font-size: 20px; color: var(--dim);
+  font-size: 26px; color: var(--dim);
 }
 #statusbar b { color: var(--text); font-weight: 700; }
 .hint { display: flex; align-items: center; gap: 12px; }
@@ -113,16 +113,16 @@ svg { display: block; }
 .home-title { left: 140px; top: 60px; font-size: 56px; font-weight: 700; }
 .home-sub { left: 140px; top: 136px; font-size: 28px; color: var(--dim); }
 .cards { left: 140px; top: 220px; width: 1640px; display: grid; grid-template-columns: 800px 800px; gap: 24px 40px; }
-.card { position: relative; height: 170px; border-radius: 22px; background: var(--panel); padding: 30px 30px 0 160px; }
+.card { position: relative; height: 196px; border-radius: 22px; background: var(--panel); padding: 28px 30px 0 160px; }
 .card.focus { background: rgba(47, 125, 225, .9); box-shadow: 0 0 0 4px rgba(255, 255, 255, .8); }
-.card .ico { position: absolute; left: 36px; top: 40px; width: 90px; height: 90px; }
+.card .ico { position: absolute; left: 36px; top: 53px; width: 90px; height: 90px; }
 .card .name { font-size: 36px; font-weight: 700; }
-.card .path { font-size: 24px; color: var(--dim); margin-top: 2px; }
+.card .path { font-size: 30px; color: var(--dim); margin-top: 2px; }
 .card.focus .path, .card.focus .info { color: #dbe8fb; }
 .card .bar { height: 12px; border-radius: 6px; margin-top: 12px; background: rgba(0, 0, 0, .27); }
 .card.focus .bar > i:not(.full) { background: #fff; }
 .card .bar > i { background: #6fb1ff; }
-.card .info { font-size: 22px; color: var(--dim); margin-top: 12px; }
+.card .info { font-size: 30px; color: var(--dim); margin-top: 12px; }
 
 /* ---------------------------------------------------------------- scanning / deleting */
 .spinner {
