@@ -640,7 +640,8 @@ function browseInput(a) {
     else if (a === 'pagedown') S.bfocus += VIS;
     else if ((a === 'confirm' || a === 'right') && f) { reveal(f.id, f.parentId); return; }
     else if (a === 'mark') { toggleMark(f); return; }
-    else if (a === 'back' || a === 'left') S.tab = 0;
+    else if (a === 'back') { leaveScan(); return; }
+    else if (a === 'left') return;
     clampList('bfocus', 'bscroll', n);
     render();
     return;
@@ -675,7 +676,7 @@ function gamesInput(a) {
   else if (a === 'pagedown') S[fk] += vis;
   else if (a === 'confirm' || a === 'right') { if (f) { if (g) revealPath(f); else openGame(f); } return; }
   else if (a === 'mark') { toggleMark(f); return; }
-  else if (a === 'back' || a === 'left') { if (g) closeGame(); else { S.tab = 0; render(); } return; }
+  else if (a === 'back' || a === 'left') { if (g) closeGame(); else if (a === 'back') leaveScan(); return; }
   clampList(fk, sk, list.length, vis);
   render();
 }
