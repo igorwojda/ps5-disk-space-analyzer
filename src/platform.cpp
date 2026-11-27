@@ -62,6 +62,21 @@ std::vector<Storage> ListStorages(const std::vector<std::string>& extra) {
   return out;
 }
 
+uint64_t DiskBytes(const struct stat& st) {
+  uint64_t alloc = (uint64_t)st.st_blocks * 512u;
+  uint64_t size = (uint64_t)st.st_size;
+#if defined(__PROSPERO__)
+  // Installed PS5 games' app.pkg reports a fraction of its blocks (HITMAN 3:
+  // 108 MB of 67.8 GB) though the whole file is on disk. The PS5 has no
+  // sparse files worth knowing about, so the larger of the two is right.
+  return alloc > size ? alloc : size;
+#else
+  // Allocated size is what a delete gives back (sparse files, compression);
+  // fall back to the logical size on file systems that do not report blocks.
+  return alloc ? alloc : size;
+#endif
+}
+
 std::vector<std::string> SkipList() {
 #if defined(__PROSPERO__)
   return {"/dev", "/proc", "/mnt/sandbox", "/mnt/proc"};

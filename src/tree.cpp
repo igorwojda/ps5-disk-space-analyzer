@@ -11,6 +11,8 @@
 #include <cstring>
 #include <queue>
 
+#include "platform.h"
+
 // ---------------------------------------------------------------- Node
 
 Node::~Node() {
@@ -81,13 +83,6 @@ void Index::Remove(Node* subtree) {
 }
 
 // ---------------------------------------------------------------- helpers
-
-static uint64_t DiskBytes(const struct stat& st) {
-  // Allocated size is what a delete gives back; fall back to the logical
-  // size on file systems that do not report blocks.
-  uint64_t alloc = (uint64_t)st.st_blocks * 512u;
-  return alloc ? alloc : (uint64_t)st.st_size;
-}
 
 static std::string Join(const std::string& dir, const char* name) {
   std::string p = dir;

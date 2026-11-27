@@ -2,6 +2,8 @@
 // Where to scan and what must never be deleted.
 #pragma once
 
+#include <sys/stat.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -28,3 +30,6 @@ bool IsProtected(const std::string& path);
 
 // Non-empty when deleting `path` has a side effect worth a warning.
 std::string DeleteWarning(const std::string& path);
+
+// Space a file or folder takes on disk: what deleting it gives back.
+uint64_t DiskBytes(const struct stat& st);

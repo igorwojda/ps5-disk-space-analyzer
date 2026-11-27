@@ -11,6 +11,8 @@
 #include <mutex>
 #include <vector>
 
+#include "platform.h"
+
 namespace {
 
 std::mutex g_mu;
@@ -213,11 +215,6 @@ namespace {
 // How deep below a volume root a title ID folder can sit:
 // /user/av_contents/photo/NPXS40087/<ID> is the deepest known.
 const int kMaxDepth = 5;
-
-uint64_t DiskBytes(const struct stat& st) {
-  uint64_t alloc = (uint64_t)st.st_blocks * 512u;
-  return alloc ? alloc : (uint64_t)st.st_size;
-}
 
 std::vector<std::string> Segments(const std::string& path) {
   std::vector<std::string> out;
