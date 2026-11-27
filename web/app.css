@@ -181,6 +181,11 @@ svg { display: block; }
 .btn.danger.focus { background: #94302f; }
 .btn .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--danger); }
 .btn span { position: relative; }
+.btn { gap: 14px; }
+.btn-ico { display: flex; }
+/* A button glyph inside running text. */
+.ig { display: inline-block; vertical-align: middle; margin: -6px 2px 0; }
+.ig .glyph { width: 1.25em; height: 1.25em; display: block; }
 
 /* ---------------------------------------------------------------- toast */
 #toast {

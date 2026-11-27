@@ -126,9 +126,13 @@ function focusedItem() {
 }
 
 let toastTimer = 0;
+// Escape text and draw button names (Cross, Square...) as their glyphs.
+const glyphText = (s) => esc(s).replace(/\b(Cross|Circle|Square|Triangle)\b/g,
+  (m) => `<span class="ig">${GLYPH[m.toLowerCase()]}</span>`);
+
 function toast(msg) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.innerHTML = glyphText(msg);
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
@@ -268,7 +272,7 @@ function askDelete() {
     title: `Delete ${fmtCount(list.length)} ${list.length === 1 ? 'item' : 'items'}?`,
     lines: [`${fmtSize(markedBytes())} in ${fmtCount(files)} files will be permanently deleted.`, 'This cannot be undone.'],
     warning: warn,
-    buttons: ['Cancel', 'Hold Cross to delete'],
+    buttons: ['Cancel', 'Hold to delete'],
     cancel: 0, hold: 1, focus: 1, danger: true,
     onChoose: (i) => { if (i === 1) runDelete(list); },
   });
@@ -372,20 +376,24 @@ function startHold(src) {
   requestAnimationFrame(tickHold);
 }
 function endHold(src) {
-  if (hold && (src == null || hold.src === src)) stopHold();
+  if (hold && !hold.done && (src == null || hold.src === src)) stopHold();
 }
 function stopHold() {
   hold = null;
   const f = document.querySelector('#dialog .fill');
   if (f) f.style.width = '0';
 }
+// The danger colour fills the button left to right while Cross is held;
+// a full button deletes.
 function tickHold() {
-  if (!hold || !S.dialog) return;
-  const p = (performance.now() - hold.t0) / HOLD_MS;
-  if (p >= 1) { hold = null; closeDialog(S.dialog.hold); return; }
+  if (!hold || hold.done || !S.dialog) return;
+  const p = Math.min(1, (performance.now() - hold.t0) / HOLD_MS);
   const f = document.querySelector('#dialog .fill');
   if (f) f.style.width = (p * 100) + '%';
-  requestAnimationFrame(tickHold);
+  if (p < 1) { requestAnimationFrame(tickHold); return; }
+  hold.done = true;
+  const d = S.dialog;
+  setTimeout(() => { if (S.dialog === d) closeDialog(d.hold); }, 150);  // show it full first
 }
 
 function dialogInput(a) {
@@ -616,10 +624,15 @@ document.addEventListener('click', (e) => {
   act(el);
 });
 
+// The PS5 browser turns Cross into a mouse press wherever its pointer rests,
+// so with the pointer unused a press anywhere holds the focused button.
 const pointerDown = (e) => {
+  const d = S.dialog;
+  if (!d || d.hold < 0) return;
   const el = e.target.closest('[data-act="dlg"]');
-  if (el && S.dialog && Number(el.dataset.i) === S.dialog.hold) {
-    S.dialog.focus = S.dialog.hold;
+  const onHold = el && Number(el.dataset.i) === d.hold;
+  if (onHold || (!S.cursor && d.focus === d.hold)) {
+    d.focus = d.hold;
     startHold('ptr');
   }
 };
@@ -974,7 +987,7 @@ function renderBrowse() {
     hints += `<div class="hint-right"><div class="pill" data-act="hint" data-a="review">${GLYPH.triangle}
       ${fmtCount(S.marked.size)} selected &middot; ${fmtSize(markedBytes())} &nbsp; Review &amp; clean</div></div>`;
   } else {
-    hints += '<div class="hint-right muted">Press Square to select items to clean up</div>';
+    hints += `<div class="hint-right muted">${glyphText('Press Square to select items to clean up')}</div>`;
   }
   return [h, hints];
 }
@@ -1015,11 +1028,11 @@ function renderDialog() {
   if (!d) { box.innerHTML = ''; return; }
   const one = d.buttons.length === 1;
   box.innerHTML = `<div class="dlg"><h2>${esc(d.title)}</h2>
-    ${d.lines.map((l) => `<p>${esc(l)}</p>`).join('')}
+    ${d.lines.map((l) => `<p>${glyphText(l)}</p>`).join('')}
     ${d.warning ? `<div class="warn">${esc(d.warning)}</div>` : ''}
     <div class="btns${d.vertical ? ' v' : ''}${one ? ' one' : ''}">
       ${d.buttons.map((b, i) => `<div class="btn${i === d.focus ? ' focus' : ''}${i === d.hold && d.danger ? ' danger' : ''}"
-         data-act="dlg" data-i="${i}">${i === d.hold ? '<i class="fill"></i>' : ''}<span>${esc(b)}</span></div>`).join('')}
+         data-act="dlg" data-i="${i}">${i === d.hold ? `<i class="fill"></i><span class="btn-ico">${GLYPH.cross}</span>` : ''}<span>${glyphText(b)}</span></div>`).join('')}
     </div></div>`;
 }
 
