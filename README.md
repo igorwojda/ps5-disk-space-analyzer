@@ -2,9 +2,10 @@
 
 **Running out of space on your PS5? Find out where it went.**
 
-Your PS5 says the drive is full, but what is actually filling it? Disk Space
-Analyzer scans your storage and shows you, which games and
-folders take the most space. Then you pick what to remove and get that space back.
+The PS5 storage screen lumps a lot of data under "Other", and that "Other" can
+take up a big part of your drive with no way to see what is in it. Disk Space
+Analyzer is a handy PS5 utility that shows which games and folders are taking
+up space, so you can choose what to remove.
 
 ![Choose a storage to scan](docs/screenshots/home.png)
 
