@@ -49,6 +49,9 @@ struct State {
   std::vector<std::string> result_notes;  // what went wrong, in words
   std::string error;  // last scan error
   time_t scanned = 0;  // when the scan finished
+  // Which scan the node ids belong to: a new scan numbers its nodes from 0
+  // again, so an id from an earlier one would name another file.
+  int scan_seq = 0;
   // Games tab: every game's folders on every volume, counted on their own thread.
   std::unique_ptr<GameScanner> game_scanner;
   std::vector<GameTotal> games;
@@ -356,6 +359,22 @@ std::vector<PathTarget> SelectedLocked(const Request& req, bool cut = false) {
   return top;
 }
 
+// True when a request names nodes by id but not as the current scan's
+// (scan=N from /api/status): another device rescanned since it selected them.
+bool StaleIdsLocked(const Request& req) {
+  auto it = req.query.find("ids");
+  if (it == req.query.end() || it->second.empty()) return false;
+  auto s = req.query.find("scan");
+  return s == req.query.end() || s->second != std::to_string(g.scan_seq);
+}
+
+void StaleError(Response& res) {
+  res.status = 409;
+  res.type = "application/json";
+  res.body = "{\"error\":\"The drive was scanned again since these items were selected. Select them again.\","
+             "\"stale\":true}";
+}
+
 // A folder items may be moved into: a storage on the list (not the system
 // partition), or an unprotected folder of the scanned tree.
 bool MoveDestinationOk(const std::string& dest) {
@@ -453,6 +472,7 @@ void FinishScanLocked() {
   g.index.Clear();
   g.root = r;
   g.index.Add(r);
+  g.scan_seq++;
   g.biggest = BiggestFiles(r, 500);
   g.phase = Phase::Ready;
   g.scanned = time(nullptr);
@@ -753,7 +773,7 @@ void ApiHandle(const Request& req, Response& res) {
     std::ostringstream o;
     o << "{\"phase\":\"" << PhaseName(g.phase) << "\"";
     if (g.root || g.phase == Phase::Scanning) o << ",\"storage\":" << StorageJson(g.storage);
-    if (g.root) o << ",\"root\":" << g.root->id << ",\"rootSize\":" << g.root->size;
+    if (g.root) o << ",\"root\":" << g.root->id << ",\"rootSize\":" << g.root->size << ",\"scan\":" << g.scan_seq;
     if (g.scanner)
       o << ",\"items\":" << g.scanner->Items() << ",\"bytes\":" << g.scanner->Bytes()
         << ",\"current\":" << Str(g.scanner->CurrentPath());
@@ -822,6 +842,10 @@ void ApiHandle(const Request& req, Response& res) {
       Error(res, 409, "busy");
       return;
     }
+    if (StaleIdsLocked(req)) {
+      StaleError(res);
+      return;
+    }
     std::vector<PathTarget> top = SelectedLocked(req);
     if (top.empty()) {
       Error(res, 400, "nothing deletable selected");
@@ -860,6 +884,10 @@ void ApiHandle(const Request& req, Response& res) {
   } else if (p == "/api/move" && req.method == "POST") {
     if (g.phase != Phase::Ready) {
       Error(res, 409, "busy");
+      return;
+    }
+    if (StaleIdsLocked(req)) {
+      StaleError(res);
       return;
     }
     auto it = req.query.find("dest");

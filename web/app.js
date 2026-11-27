@@ -214,6 +214,7 @@ const S = {
   scan: null,         // progress while scanning / deleting
   reportBack: 'home', // screen to return to once the report is made
   resultSeq: 0,
+  scanSeq: 0,         // the server's scan the node ids on screen belong to
 };
 
 // Review screen buttons: Cut, Move to and Clear side by side, Delete below.
@@ -412,6 +413,7 @@ async function enterBrowse(st, place) {
   S.rootNode = null;
   S.tab = 0;
   S.resultSeq = st.result ? st.result.seq : 0;
+  S.scanSeq = st.scan || 0;
   S.screen = 'browse';
   S.mfocus = -1;
   S.game = S.gpart = S.gnode = null;
@@ -783,8 +785,9 @@ async function runDelete(list) {
   // Scanned items go by id; game folders on other volumes by path.
   const ids = list.filter((m) => typeof m.id === 'number').map((m) => m.id);
   const paths = list.filter((m) => typeof m.id !== 'number').map((m) => m.path);
-  const body = 'ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
+  const body = 'scan=' + S.scanSeq + '&ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
   try { await api('/api/delete', 'POST', body); } catch (e) {
+    if (e.data && e.data.stale) return reloadStale(e.message);
     toast('Delete failed to start: ' + e.message);
     return;
   }
@@ -922,9 +925,10 @@ async function runMove(list, dest, destName, onStart, from, paste) {
   } else {
     const ids = list.filter((m) => typeof m.id === 'number').map((m) => m.id);
     const paths = list.filter((m) => typeof m.id !== 'number').map((m) => m.path);
-    body += '&ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
+    body += '&scan=' + S.scanSeq + '&ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
   }
   try { await api('/api/move', 'POST', body); } catch (e) {
+    if (e.data && e.data.stale) return reloadStale(e.message);
     if (e.data && e.data.need) toast(`Not enough space on ${destName}: needs ${fmtSize(e.data.need)}, ${fmtSize(e.data.free)} free`);
     else toast('Move failed to start: ' + e.message);
     return;
@@ -978,6 +982,20 @@ async function reloadAfterChange(st) {
   await loadBiggest();
   await openNode(S.node ? S.node.id : S.rootId, null);
   if (S.gnode) openGameNode(S.gnode.id);
+}
+
+// Another device scanned again since this one selected: the ids on screen name
+// other files now. Drop the selection and show the new scan at the same place.
+async function reloadStale(message) {
+  S.marked.clear();
+  S.clip = null;
+  S.dialog = null;
+  toast(message);
+  let st;
+  try { st = await api('/api/status'); } catch (e) { st = null; }
+  if (st && st.phase === 'ready' && st.storage) await enterBrowse(st, currentPlace());
+  else { S.screen = 'home'; await loadStorages(); }
+  render();
 }
 
 // ---------------------------------------------------------------- report
