@@ -310,9 +310,12 @@ void Deleter::Remove(const std::string& path, uint64_t dev) {
     }
     if (rmdir(path.c_str()) == 0) freed_ += DiskBytes(st);
     else errors_++;
+  } else if (unlink(path.c_str()) == 0) {
+    // A file with other hard links keeps its data until the last one goes:
+    // only that unlink gives the space back (lstat above saw the links left).
+    if (st.st_nlink <= 1) freed_ += DiskBytes(st);
   } else {
-    if (unlink(path.c_str()) == 0) freed_ += DiskBytes(st);
-    else errors_++;
+    errors_++;
   }
 }
 
