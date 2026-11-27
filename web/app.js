@@ -10,7 +10,7 @@
 //
 // Input, all mapped to the same actions:
 //   D-pad / arrow keys      move focus          Cross / Enter      open, confirm
-//   Circle / Esc / browser back                  back
+//   Circle / Esc / browser back                  back; on home closes the app
 //   Square / Space          select             Triangle / Tab     review & clean, paste
 //   L1 R1 / Q E             switch tab         L2 R2 / PgUp PgDn  page
 //   Options / M             menu
@@ -959,9 +959,11 @@ function dialogInput(a) {
 
 const REPEATS = new Set(['up', 'down', 'left', 'right', 'pageup', 'pagedown']);
 let last = { a: '', src: '', t: 0 };
+let lastBack = -1e9;  // when the last Circle that did not come from history arrived
 
 function input(a, src) {
   const now = performance.now();
+  if (a === 'back' && src !== 'history') lastBack = now;
   // The same press can arrive as a key event and as a gamepad button.
   if (a === last.a && src !== last.src && now - last.t < 90) return;
   last = { a, src, t: now };
@@ -1242,16 +1244,27 @@ const KEYCODES = { 38: 'up', 40: 'down', 37: 'left', 39: 'right', 13: 'confirm',
 const BROWSER_KEYS = new Set([112, 113, 116, 117, 118, 119]);
 let lastFnKey = 0;
 
+// A held button repeats its keydown every 50 ms, without e.repeat on the PS5.
+let heldKey = 0, heldAt = 0;
+
 document.addEventListener('keydown', (e) => {
+  const now = performance.now();
   const a = KEYS[e.key] || KEYCODES[e.keyCode];
+  const repeat = e.repeat || (e.keyCode === heldKey && now - heldAt < 600);
+  heldKey = e.keyCode;
+  heldAt = now;
   if (!a) return;
+  // Left to the browser, Circle on home finds no page to go back to: the PS5 closes the app.
+  if (a === 'back' && homeIdle() && !repeat && !stepping && history.state && history.state.g === 0) return;
   e.preventDefault();
-  if (BROWSER_KEYS.has(e.keyCode) || /^F\d$/.test(e.key)) lastFnKey = performance.now();
+  if (a === 'back' && homeIdle()) return;
+  if (BROWSER_KEYS.has(e.keyCode) || /^F\d$/.test(e.key)) lastFnKey = now;
   if (a === 'confirm') startHold('key');
-  if (e.repeat && !REPEATS.has(a)) return;
+  if (repeat && !REPEATS.has(a)) return;
   input(a, 'key');
 });
 document.addEventListener('keyup', (e) => {
+  if (e.keyCode === heldKey) heldKey = 0;
   const a = KEYS[e.key] || KEYCODES[e.keyCode];
   if (!a) return;
   e.preventDefault();
@@ -1309,25 +1322,26 @@ document.addEventListener('wheel', (e) => {
   e.preventDefault();
 }, { passive: false });
 
-// Circle in the PS5 browser is "back". Keep one spare history entry so it
-// lands here instead of leaving the page.
-let lastPadBack = 0, exitArmed = false;
+// Circle reaches the PS5 browser as Escape, and its default action is "back".
+// Off home, keep one spare history entry so a back lands here instead of
+// leaving the page. On home there is none: Circle is left to the browser, and
+// the PS5 closes the app as it does for other browser apps.
+let stepping = false;
+const homeIdle = () => S.screen === 'home' && !S.dialog;
+function syncHistory() {
+  if (stepping) return;
+  const spare = history.state && history.state.g === 1;
+  if (!homeIdle() && !spare) history.pushState({ g: 1 }, '');
+  else if (homeIdle() && spare) { stepping = true; history.back(); }
+}
 history.replaceState({ g: 0 }, '');
-history.pushState({ g: 1 }, '');
 window.addEventListener('popstate', () => {
-  // Already handled as a pad Circle, or a browser default for L1 and co.
   const now = performance.now();
-  if (now - lastPadBack < 400 || now - lastFnKey < 600) { history.pushState({ g: 1 }, ''); return; }
-  if (S.screen === 'home' && !S.dialog) {
-    if (exitArmed) return;  // second press leaves
-    exitArmed = true;
-    toast('Press Circle again to close');
-    setTimeout(() => { exitArmed = false; }, 2500);
-    history.pushState({ g: 1 }, '');
-    return;
-  }
-  input('back', 'history');
-  history.pushState({ g: 1 }, '');
+  if (stepping) { stepping = false; syncHistory(); return; }
+  // A Circle already handled as a pad button, a browser default for L1 and co.,
+  // or the popstate WebKit fires on load.
+  if (now - lastBack >= 400 && now - lastFnKey >= 600 && now > 1500) input('back', 'history');
+  syncHistory();
 });
 
 // ---------------------------------------------------------------- gamepad
@@ -1371,7 +1385,6 @@ function padPress(a) {
     clickSuppressUntil = performance.now() + 300;
     startHold('pad');
   }
-  if (a === 'back') lastPadBack = performance.now();
   input(a, 'pad');
 }
 requestAnimationFrame(pollPad);
@@ -1478,6 +1491,7 @@ function render() {
     lightChart(chain || []);
   }
   renderDialog();
+  syncHistory();
 }
 
 function hint(glyph, label, a) {
@@ -1526,7 +1540,7 @@ function renderHome() {
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
   let hints = hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('square', 'Export report', 'mark') +
-              hint('triangle', 'Settings', 'review') +
+              hint('triangle', 'Settings', 'review') + hint('circle', 'Close') +
               hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
