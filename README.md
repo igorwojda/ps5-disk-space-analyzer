@@ -18,9 +18,6 @@ up space, so you can choose what to remove.
   screenshots, clips and downloads, all added up in one place, with the game's
   cover and name.
 - 📁 **Find the biggest files** on the drive in one list.
-- 🧹 **Clean up safely:** select what you don't need and see how much space you'll
-  get back before you delete. System files are locked, so you can't remove
-  anything the console needs.
 - 🗑️ **Keep the console's records in sync:** deleting a game uninstalls it
   through the system, just like deleting it from the home screen. The console's
   game database (`app.db`) is updated too, so no broken tile is left in your
