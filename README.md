@@ -51,8 +51,9 @@ moved the cursor since your last D-pad press. Otherwise it acts on the
 focused item. ○ goes back step by step. Press it twice on the storage list to
 close the browser.
 
-The PS5 browser does not always pass □, △, L1/R1 or Options to web pages.
-Everything is also clickable with the cursor.
+The PS5 browser sends △, □, L1, R1, L2 and R2 as the keys F1, F2 and F5–F8,
+which the app handles. It may not pass Options to web pages; everything is
+also clickable with the cursor.
 
 ## Safety
 

@@ -10,7 +10,9 @@
 //   Options / M             menu
 //   Left stick / mouse      cursor: hover focuses, Cross/click acts on what is under it
 // The Gamepad API is used when the browser offers it; otherwise the PS5
-// browser's own key events and cursor clicks do the job.
+// browser's own key events and cursor clicks do the job. The PS5 browser
+// sends some buttons as function keys: Triangle F1, Square F2, L1 F5, R1 F6,
+// L2 F7, R2 F8. Left unhandled, L1 makes the browser go back.
 'use strict';
 
 const VIS = 10;            // list rows on screen
@@ -569,20 +571,29 @@ const KEYS = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'confirm',
   ' ': 'mark', Escape: 'back', Backspace: 'back', Tab: 'review', Delete: 'review',
   q: 'tabprev', e: 'tabnext', PageUp: 'pageup', PageDown: 'pagedown', m: 'menu', ContextMenu: 'menu',
+  F1: 'review', F2: 'mark', F5: 'tabprev', F6: 'tabnext', F7: 'pageup', F8: 'pagedown',
 };
 const KEYCODES = { 38: 'up', 40: 'down', 37: 'left', 39: 'right', 13: 'confirm', 27: 'back', 8: 'back',
-                   32: 'mark', 9: 'review', 33: 'pageup', 34: 'pagedown' };
+                   32: 'mark', 9: 'review', 33: 'pageup', 34: 'pagedown',
+                   112: 'review', 113: 'mark', 116: 'tabprev', 117: 'tabnext', 118: 'pageup', 119: 'pagedown' };
+// Buttons the browser also gives a default action (history back, reload).
+const BROWSER_KEYS = new Set([112, 113, 116, 117, 118, 119]);
+let lastFnKey = 0;
 
 document.addEventListener('keydown', (e) => {
   const a = KEYS[e.key] || KEYCODES[e.keyCode];
   if (!a) return;
   e.preventDefault();
+  if (BROWSER_KEYS.has(e.keyCode) || /^F\d$/.test(e.key)) lastFnKey = performance.now();
   if (a === 'confirm') startHold('key');
   if (e.repeat && !REPEATS.has(a)) return;
   input(a, 'key');
 });
 document.addEventListener('keyup', (e) => {
-  if ((KEYS[e.key] || KEYCODES[e.keyCode]) === 'confirm') endHold('key');
+  const a = KEYS[e.key] || KEYCODES[e.keyCode];
+  if (!a) return;
+  e.preventDefault();
+  if (a === 'confirm') endHold('key');
 });
 
 let lastPointer = { x: -1, y: -1 };
@@ -637,7 +648,9 @@ let lastPadBack = 0, exitArmed = false;
 history.replaceState({ g: 0 }, '');
 history.pushState({ g: 1 }, '');
 window.addEventListener('popstate', () => {
-  if (performance.now() - lastPadBack < 400) { history.pushState({ g: 1 }, ''); return; }
+  // Already handled as a pad Circle, or a browser default for L1 and co.
+  const now = performance.now();
+  if (now - lastPadBack < 400 || now - lastFnKey < 600) { history.pushState({ g: 1 }, ''); return; }
   if (S.screen === 'home' && !S.dialog) {
     if (exitArmed) return;  // second press leaves
     exitArmed = true;
