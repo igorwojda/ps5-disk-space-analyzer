@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // File tree model, background scanner, deleter and mover.
 #pragma once
 

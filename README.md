@@ -32,6 +32,9 @@ up space, so you can choose what to remove.
 - 📄 **Export a report:** pick one drive or all of them and save one HTML file
   with every folder and file and the space each takes, to keep or share. It
   opens in any browser.
+- 🖥️ **Full screen on the PS5:** turn on Full screen in Settings and the
+  app switches the console's browser to full screen whenever it opens. Turn
+  it off to get the browser's normal window back.
 - 📱 **Use your phone or PC:** the same app opens in any browser on your home
   network.
 
@@ -60,6 +63,7 @@ at the bottom of the app, such as `http://192.168.1.20:8833/`.
 Needs `cmake`, `clang` and `lld`. On macOS: `brew install llvm lld cmake`.
 
 ```sh
+git submodule update --init # fetch vendor/browser-fullscreen
 make toolchain              # download the PS5 payload SDK (once, ~700 MB)
 make package                # build dist/disk-space-analyzer.elf
 make send PS5_HOST=<ps5-ip> # send it to your console
@@ -83,4 +87,12 @@ removes the title's folders, as the console would.
 - Uninstall through the system and Playden's file formats from
   [playden-ps5](https://github.com/leolobato/playden-ps5) and
   [prospero-disk](https://github.com/leolobato/prospero-disk).
+- Full-screen browser from
+  [ps5-web-browser-fullscreen](https://github.com/owendswang/ps5-web-browser-fullscreen)
+  by owendswang (GPLv3). It is built into the payload with the embed patch
+  and glue code from ps5-web-file-manager.
 - Font: [Lato](https://www.latofonts.com/) (SIL Open Font License).
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

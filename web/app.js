@@ -91,13 +91,18 @@ const GLYPH = {
 
 // ================================================================ settings
 
+// The console's own browser.
+const ON_PS5 = /PlayStation/i.test(navigator.userAgent);
+
 // Kept in this browser's localStorage, so each device has its own.
 const SETTINGS = [
+  { key: 'fullscreen', label: 'Full screen', values: [false, true], def: false, ps5: true,
+    show: (v) => (v ? 'On' : 'Off') },
   { key: 'textSize', label: 'Text size', values: [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5], def: 1,
     show: (v) => Math.round(v * 100) + '%' },
   { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
     show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
-];
+].filter((d) => !d.ps5 || ON_PS5);
 const SETTINGS_KEY = 'dsa.settings';
 const settings = {};
 
@@ -153,6 +158,31 @@ function stepSetting(i, dir) {
   saveSettings();
   applySettings();
   render();
+  if (d.key === 'fullscreen') applyFullscreen(false);
+}
+
+// ================================================================ full screen
+
+// The patched browser gives the page the whole 1920x1080 screen.
+function browserFullscreen() {
+  return window.innerWidth >= 1920 && window.innerHeight >= 1080;
+}
+
+// Brings the browser in line with the Full screen setting. The server closes
+// the browser, patches it and opens it again. auto: on start, once per run of
+// the payload, so a patch that fails does not reopen the browser in a loop.
+async function applyFullscreen(auto) {
+  if (!ON_PS5) return;
+  const full = settings.fullscreen;
+  if (full === browserFullscreen() || (auto && !full)) return;
+  let r;
+  try {
+    r = await api(`/api/browser-layout?full=${full ? 1 : 0}${auto ? '&auto=1' : ''}`, 'POST');
+  } catch (e) {
+    toast('Could not switch the browser: ' + e.message);
+    return;
+  }
+  if (r.started) toast(full ? 'Switching to full screen…' : 'Switching back to a window…');
 }
 
 function openSettings() {
@@ -914,9 +944,7 @@ async function reloadAfterChange(st) {
 
 // ---------------------------------------------------------------- report
 
-// The PS5 browser cannot download files: it saves the report on a drive.
-const ON_PS5 = /PlayStation/i.test(navigator.userAgent);
-
+// The PS5 browser cannot download files (ON_PS5): it saves the report on a drive.
 // Choose what the report covers: one drive or all of them. `path`: the drive
 // focused first. The one scanned already goes in without a new scan.
 async function openExport(path) {
@@ -2179,6 +2207,7 @@ async function start() {
   applySettings();
   fit();
   render();
+  applyFullscreen(true);
   loadInfo();
   let st = null;
   try { st = await api('/api/status'); } catch (e) { /* server just started */ }

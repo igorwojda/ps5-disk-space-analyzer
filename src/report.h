@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // A shareable report of one or more drives: one HTML file with each folder
 // tree, the games and the space each takes, that opens in any browser.
 #pragma once

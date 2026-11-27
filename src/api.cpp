@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "api.h"
 
 #include <algorithm>
@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "browser_layout.h"
 #include "games.h"
 #include "platform.h"
 #include "report.h"
@@ -709,6 +710,16 @@ void ApiHandle(const Request& req, Response& res) {
     // PS5 browser uses 127.0.0.1, so ask the routing table instead.
     std::string ip = IsLoopback(req.local_ip) ? LanAddress() : req.local_ip;
     Json(res, 200, "{\"version\":" + Str(APP_VERSION) + ",\"ip\":" + Str(ip) + ",\"port\":" + Num(g_port) + "}");
+    return;
+  }
+
+  if (p == "/api/browser-layout" && req.method == "POST") {
+    auto q = [&](const char* k) {
+      auto it = req.query.find(k);
+      return it != req.query.end() && it->second == "1";
+    };
+    bool started = StartBrowserLayout(q("full"), q("auto"), g_port);
+    Json(res, 200, std::string("{\"started\":") + (started ? "true" : "false") + "}");
     return;
   }
 

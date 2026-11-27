@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Deleting what the console or Playden keeps a record of.
 //
 // A game's main folder (/user/app/<TITLE ID>) is uninstalled through the

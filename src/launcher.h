@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Home screen tile in the Media tab that opens the UI in the PS5 browser.
 #pragma once
 

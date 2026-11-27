@@ -68,6 +68,7 @@ configure_file(${GEN}/web_assets_table.cpp.in ${GEN}/web_assets_table.cpp COPYON
 add_executable(disk-space-analyzer
   src/main.cpp
   src/api.cpp
+  src/browser_layout.cpp
   src/games.cpp
   src/http.cpp
   src/launcher.cpp
@@ -85,6 +86,27 @@ target_compile_options(disk-space-analyzer PRIVATE -Wall -Wextra -Wno-unused-par
 target_link_libraries(disk-space-analyzer PRIVATE Threads::Threads)
 
 if(PS5)
+  # ---- browser full screen: vendor/browser-fullscreen, copied and patched
+  # for running inside this payload (patches/browser-fullscreen-embed.patch).
+  set(FS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/browser-fullscreen/src)
+  set(FS_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/patches/browser-fullscreen-embed.patch)
+  set(FS_OUT ${CMAKE_CURRENT_BINARY_DIR}/browser-fullscreen)
+  if(NOT EXISTS ${FS_SRC}/main.c)
+    message(FATAL_ERROR "vendor/browser-fullscreen is empty: run git submodule update --init")
+  endif()
+  file(GLOB FS_FILES ${FS_SRC}/*.c ${FS_SRC}/*.h)
+  add_custom_command(OUTPUT ${FS_OUT}/main.c ${FS_OUT}/hbc_patch.c
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${FS_OUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${FS_OUT}
+    COMMAND ${CMAKE_COMMAND} -E copy ${FS_FILES} ${FS_OUT}
+    COMMAND patch -s -p1 -d ${FS_OUT} -i ${FS_PATCH}
+    DEPENDS ${FS_FILES} ${FS_PATCH}
+    COMMENT "Preparing browser-fullscreen")
+  target_sources(disk-space-analyzer PRIVATE src/browser_patch.c ${FS_OUT}/hbc_patch.c)
+  set_source_files_properties(src/browser_patch.c PROPERTIES
+    INCLUDE_DIRECTORIES ${FS_OUT} OBJECT_DEPENDS ${FS_OUT}/main.c COMPILE_OPTIONS "-w")
+  set_source_files_properties(${FS_OUT}/hbc_patch.c PROPERTIES COMPILE_OPTIONS "-w")
+
   set_target_properties(disk-space-analyzer PROPERTIES SUFFIX ".elf")
   # libSceAppInstUtil needs libSceIpmi loaded first: linked alone (or loaded
   # with sceKernelLoadStartModule) the payload hangs before main() and never

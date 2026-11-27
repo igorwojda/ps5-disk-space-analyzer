@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The JSON API and static files behind the web UI.
 //
 //   GET  /api/info                app version, LAN address and port
@@ -15,6 +15,9 @@
 //                                 (a storage or an unprotected scanned folder);
 //                                 srcs=a\nb&sizes=1,2 adds cut items by path,
 //                                 from any listed storage
+//   POST /api/browser-layout?full=1|0[&auto=1]
+//                                 switch the PS5 browser to full screen or back
+//                                 to its window, then reopen it on this app
 //   POST /api/quit                stop the payload
 #pragma once
 

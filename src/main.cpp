@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Disk Space Analyzer: a payload that serves a web UI for finding and
 // deleting what takes space. On the PS5 it also adds a tile to the Media tab
 // that opens the UI in the console's browser.

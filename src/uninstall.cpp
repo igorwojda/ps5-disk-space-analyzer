@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The uninstall is the one Playden's title remover makes
 // (playden-ps5 tools/title-remover/main.c): initialize AppInstUtil, act as the
