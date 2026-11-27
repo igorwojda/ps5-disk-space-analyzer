@@ -1,0 +1,6 @@
+build-ps5/
+build-desktop/
+dist/
+.DS_Store
+.toolchain/
+CLAUDE.md
