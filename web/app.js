@@ -93,6 +93,8 @@ const SETTINGS = [
     show: (v) => Math.round(v * 100) + '%' },
   { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
     show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
+  { key: 'rescanOnReturn', label: 'Rescan when returning', values: [true, false], def: true,
+    show: (v) => (v ? 'On' : 'Off') },
 ];
 const SETTINGS_KEY = 'dsa.settings';
 const settings = {};
@@ -290,6 +292,7 @@ async function loadGames() {
   }
   clampList('gfocus', 'gscroll', S.gameList.length, GVIS);
   clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
+  if (gamesPlace) await restoreGames(r.state !== 'counting');
   if (r.state === 'counting') gamesTimer = setTimeout(loadGames, 1000);
   if (S.screen === 'browse' && S.tab === 2) render();
 }
@@ -297,7 +300,7 @@ async function loadGames() {
 async function startScan(storage) {
   try { await api('/api/scan?path=' + encodeURIComponent(storage.path), 'POST'); } catch (e) {
     toast('Could not start the scan: ' + e.message);
-    return;
+    return false;
   }
   S.storage = storage;
   S.marked.clear();
@@ -306,6 +309,7 @@ async function startScan(storage) {
   scanCancelled = false;
   render();
   pollScan();
+  return true;
 }
 
 async function pollScan() {
@@ -317,11 +321,14 @@ async function pollScan() {
     setTimeout(pollScan, 300);
     return;
   }
-  if (st.phase === 'ready' && !scanCancelled) await enterBrowse(st);
+  // A cancelled refresh keeps the previous scan: back to it, same folder.
+  const place = restorePlace;
+  restorePlace = null;
+  if (st.phase === 'ready' && (!scanCancelled || place)) await enterBrowse(st, place);
   else { S.screen = 'home'; await loadStorages(); render(); }
 }
 
-async function enterBrowse(st) {
+async function enterBrowse(st, place) {
   S.storage = st.storage;
   S.rootId = st.root;
   S.rootNode = null;
@@ -330,10 +337,144 @@ async function enterBrowse(st) {
   S.screen = 'browse';
   S.game = S.gpart = S.gnode = null;
   S.gfocus = S.gscroll = 0;
+  const back = place && place.storage === S.storage.path ? place : null;
+  gamesPlace = back && back.gid ? back : null;
   loadGames();
   await loadBiggest();
-  await openNode(st.root);
+  if (back) {
+    S.tab = back.tab || 0;
+    const i = back.bpath ? S.biggest.findIndex((x) => x.path === back.bpath) : -1;
+    if (i >= 0) { S.bfocus = i; S.bscroll = Math.max(0, i - (VIS >> 1)); clampList('bfocus', 'bscroll', S.biggest.length); }
+    await openPath(back.path, back.focus);
+  } else {
+    await openNode(st.root);
+  }
 }
+
+// ---------------------------------------------------------------- refresh
+
+// Files may change behind the app's back (another app, another device): a
+// rescan brings the drive up to date, then the same folder opens again. Node
+// ids change with every scan, so the folder is found again by its path.
+const PLACE_KEY = 'dsa.place';
+let restorePlace = null;   // where to go once the running rescan ends
+let gamesPlace = null;     // the Games tab part of it, once the games are counted
+
+// Everything on screen in every tab: the open folder, the focused file in
+// Biggest Files, and in Games the open game, its folder and a folder in it.
+function currentPlace() {
+  const f = S.node ? S.node.children[S.focus] : null;
+  const b = S.biggest[S.bfocus];
+  const gf = S.game ? null : S.gameList[S.gfocus];
+  const pf = S.game && !S.gpart ? S.game.parts[S.pfocus] : null;
+  const nf = S.gnode ? S.gnode.children[S.nfocus] : null;
+  return {
+    storage: S.storage ? S.storage.path : '', tab: S.tab,
+    path: S.node ? S.node.path : '', focus: f ? f.name : '',
+    bpath: b ? b.path : '',
+    gid: S.game ? S.game.gid : gf ? gf.gid : '', gopen: !!S.game,
+    ppath: S.gpart ? S.gpart.path : pf ? pf.path : '', popen: !!S.gpart,
+    npath: S.gnode ? S.gnode.path : '', nfocus: nf ? nf.name : '',
+  };
+}
+
+// Kept so that reopening the tile comes back to the same place too. Not while
+// a rescan is coming back to it: that would save the half-restored screen.
+function savePlace() {
+  if (S.screen !== 'browse' || restorePlace || gamesPlace) return;
+  try { localStorage.setItem(PLACE_KEY, JSON.stringify(currentPlace())); } catch (e) { /* no storage */ }
+}
+
+// The child folders from `n` down to `path`, by name; null when one is gone.
+async function walkTo(n, path) {
+  const base = n.path.endsWith('/') ? n.path : n.path + '/';
+  if (!path || path === n.path) return n;
+  if (!path.startsWith(base)) return null;
+  for (const name of path.slice(base.length).split('/').filter(Boolean)) {
+    const c = n.children.find((x) => x.name === name && x.dir && !x.mount);
+    if (!c) return null;
+    try { n = await api('/api/node?id=' + c.id); } catch (e) { return null; }
+  }
+  return n;
+}
+
+// Games tab: the game, its folder and the folder inside it, once listed.
+// `done`: the count is finished, so what is still missing is gone.
+async function restoreGames(done) {
+  const p = gamesPlace;
+  if (S.game) { gamesPlace = null; return; }  // a game opened by hand meanwhile
+  const g = S.gameList.find((x) => x.gid === p.gid);
+  if (!g) { if (done) gamesPlace = null; return; }
+  if (!p.gopen) {
+    S.gfocus = S.gameList.indexOf(g);
+    S.gscroll = Math.max(0, S.gfocus - (GVIS >> 1));
+    clampList('gfocus', 'gscroll', S.gameList.length, GVIS);
+    gamesPlace = null;
+    return;
+  }
+  const part = g.parts.find((x) => x.path === p.ppath);
+  if (!part && !done && p.ppath) return;  // its folders are still being counted
+  gamesPlace = null;
+  S.game = g;
+  S.gpart = S.gnode = null;
+  S.pfocus = part ? g.parts.indexOf(part) : 0;
+  S.pscroll = Math.max(0, S.pfocus - (PVIS >> 1));
+  clampList('pfocus', 'pscroll', g.parts.length, PVIS);
+  if (!part || !p.popen || part.id == null) return;
+  let n;
+  try { n = await api('/api/node?id=' + part.id); } catch (e) { return; }
+  n = (await walkTo(n, p.npath)) || n;
+  if (S.game !== g) return;  // left the game meanwhile
+  S.gpart = part;
+  const f = p.nfocus ? n.children.find((x) => x.name === p.nfocus) : null;
+  await openGameNode(n.id, f ? f.id : null);
+}
+function loadPlace() {
+  try { return JSON.parse(localStorage.getItem(PLACE_KEY)); } catch (e) { return null; }
+}
+
+// Open the folder at `path`, walking down from the root by name. A folder that
+// is gone (deleted or moved meanwhile) opens the drive root instead.
+async function openPath(path, focusName) {
+  let root;
+  try { root = await api('/api/node?id=' + S.rootId); } catch (e) { return openNode(S.rootId); }
+  const n = await walkTo(root, path);
+  if (!n) {
+    toast(`${path.slice(root.path.length).replace(/^\//, '')} no longer exists: showing the drive root`);
+    return openNode(S.rootId);
+  }
+  const f = focusName ? n.children.find((x) => x.name === focusName) : null;
+  return openNode(n.id, f ? f.id : null);
+}
+
+// Rescan the open drive and come back to `place` (the folder open now).
+async function refreshScan(place = currentPlace()) {
+  // Coming back often fires more than one event (visibilitychange, pageshow):
+  // a second refresh would be refused as busy and lose the folder to return to.
+  if (!S.storage || restorePlace) return false;
+  const had = S.marked.size;
+  // A selection holds this scan's ids: after a rescan they point elsewhere.
+  S.dialog = null;
+  stopHold();
+  restorePlace = place;
+  if (!(await startScan(S.storage))) { restorePlace = null; render(); return false; }
+  if (had) toast('Selection cleared: the drive is being rescanned');
+  return true;
+}
+
+// Back in the app after using another one: what was on screen may be stale.
+let hiddenAt = 0;
+function onReturn() {
+  if ((S.screen === 'browse' || S.screen === 'review') && settings.rescanOnReturn) refreshScan();
+  else if (S.screen === 'home') loadStorages().then(render);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 1000) onReturn();
+  hiddenAt = 0;
+});
+// Restored from the browser's page cache: no visibilitychange on some browsers.
+window.addEventListener('pageshow', (e) => { if (e.persisted) onReturn(); });
 
 function cancelScan() {
   scanCancelled = true;
@@ -813,7 +954,7 @@ async function saveReport(t) {
 }
 
 function openMenu() {
-  const items = [['Rescan ' + (S.storage ? S.storage.name : ''), () => S.storage && startScan(S.storage)],
+  const items = [['Refresh (rescan ' + (S.storage ? S.storage.name : '') + ')', () => refreshScan()],
                  ['Export report', () => openExport(S.storage ? S.storage.path : '')]];
   if (S.clip) {
     const n = fmtCount(S.clip.length);
@@ -1467,6 +1608,7 @@ function lightChart(chain) {
 // ================================================================ render
 
 function render() {
+  savePlace();
   const main = $('#main');
   let html = '';
   let hints = '';
@@ -1991,7 +2133,11 @@ async function start() {
     render();
     pollMove();
   } else if (st && st.phase === 'ready' && st.root != null) {
-    await enterBrowse(st);
+    // Files may have changed while the app was closed: rescan, same folder.
+    S.storage = st.storage;
+    let place = loadPlace();
+    if (!place || place.storage !== st.storage.path) place = { storage: st.storage.path, path: '', tab: 0, focus: '' };
+    if (!settings.rescanOnReturn || !(await refreshScan(place))) await enterBrowse(st, place);
   } else {
     render();
   }
