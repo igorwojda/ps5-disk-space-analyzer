@@ -178,6 +178,7 @@ svg { display: block; }
   display: flex; align-items: center; gap: 14px; height: 52px; padding: 0 30px 0 8px;
   border-radius: 26px; background: var(--good); font-weight: 700; color: #0a1626;
 }
+.pill.move { background: var(--accent); color: var(--text); }
 .muted { color: var(--dim); font-size: calc(30px * var(--fs)); }
 
 /* ---------------------------------------------------------------- home */
@@ -216,6 +217,7 @@ svg { display: block; }
 .path-label { left: 260px; width: 1400px; top: 760px; text-align: center; font-size: calc(24px * var(--fs)); color: var(--faint); }
 .progress { left: 510px; top: 714px; width: 900px; height: 14px; border-radius: 7px; background: rgba(255, 255, 255, .12); overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--danger); min-width: 14px; transition: width .2s; }
+.progress > i.move { background: var(--accent); }
 
 /* ---------------------------------------------------------------- review */
 .summary { left: 1100px; top: 130px; width: 780px; height: 808px; border-radius: 22px; background: var(--panel); box-shadow: 0 0 0 2px var(--panel-line); }
@@ -229,16 +231,22 @@ svg { display: block; }
 .sum-space .after { background: var(--accent); }
 .sum-space .row2 { display: flex; justify-content: space-between; }
 .sum-space .row2 b { color: var(--text); font-size: calc(26px * var(--fs)); }
-.warns { left: 1160px; width: 680px; bottom: 292px; font-size: calc(22px * var(--fs)); color: var(--warn); }
+.warns { left: 1160px; width: 680px; bottom: 400px; font-size: calc(22px * var(--fs)); color: var(--warn); }
 .warns div { margin-top: 14px; padding-left: 40px; position: relative; }
 .warns div::before { content: "!"; position: absolute; left: 0; top: -2px; width: 28px; height: 26px;
   background: var(--warn); color: #1a1a1a; font-weight: 700; text-align: center; line-height: 28px;
   clip-path: polygon(50% 0, 100% 100%, 0 100%); font-size: calc(16px * var(--fs)); }
-.delbtn {
-  left: 1160px; top: 808px; width: 660px; height: 92px; border-radius: 46px;
-  background: rgba(229, 72, 77, .6); display: flex; align-items: center; justify-content: center;
+.rbtn {
+  height: 92px; border-radius: 46px; display: flex; align-items: center; justify-content: center;
   font-size: calc(34px * var(--fs)); font-weight: 700; gap: 20px;
 }
+.cutbtn, .movebtn, .clearbtn { top: 696px; width: 207px; font-size: calc(30px * var(--fs));
+  background: rgba(47, 125, 225, .35); box-shadow: 0 0 0 2.5px rgba(255, 255, 255, .3) inset; }
+.cutbtn { left: 1160px; }
+.movebtn { left: 1386px; }
+.clearbtn { left: 1613px; background: transparent; }
+.cutbtn.focus, .movebtn.focus, .clearbtn.focus { background: var(--accent); box-shadow: 0 0 0 5px #fff; }
+.delbtn { left: 1160px; top: 808px; width: 660px; background: rgba(229, 72, 77, .6); }
 .delbtn.focus { background: var(--danger); box-shadow: 0 0 0 5px #fff; }
 
 /* ---------------------------------------------------------------- dialog */

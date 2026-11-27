@@ -5,12 +5,16 @@
 //   GET  /api/storages            storages with free/total
 //   POST /api/scan?path=P         start scanning P (replaces the last scan)
 //   POST /api/cancel              cancel the running scan
-//   GET  /api/status              phase, progress, last delete result
+//   GET  /api/status              phase, progress, last delete or move result
 //   GET  /api/node?id=N           folder N: children (all) + rings for the chart
 //   GET  /api/biggest             biggest files of the scan
 //   GET  /api/games               every game's folders on every volume, added up
 //   POST /api/delete?ids=1,2,3    delete these nodes (protected ones are refused);
 //                                 paths=a\nb deletes game folders found by /api/games
+//   POST /api/move?dest=D&ids=..  move the same kind of selection into folder D
+//                                 (a storage or an unprotected scanned folder);
+//                                 srcs=a\nb&sizes=1,2 adds cut items by path,
+//                                 from any listed storage
 //   POST /api/quit                stop the payload
 #pragma once
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// File tree model, background scanner and deleter.
+// File tree model, background scanner, deleter and mover.
 #pragma once
 
 #include <pthread.h>
@@ -80,13 +80,17 @@ class Scanner {
   std::vector<std::pair<uint64_t, uint64_t>> hardlinks_;  // (dev, ino), sorted
 };
 
+// A selected file or folder to delete or move.
+struct PathTarget {
+  std::string path;
+  Node* node;         // its node in the scanned tree, or null (another volume)
+  uint64_t size = 0;  // bytes on disk, for progress
+};
+
 // Deletes a list of paths on its own thread. Never touches the tree.
 class Deleter {
  public:
-  struct Target {
-    std::string path;
-    Node* node;  // its node in the scanned tree, or null (another volume)
-  };
+  using Target = PathTarget;
   struct Result {
     Node* node;
     bool gone;  // path no longer exists
@@ -117,6 +121,48 @@ class Deleter {
   std::atomic<uint64_t> freed_{0};
   std::atomic<uint64_t> errors_{0};
 };
+
+// Moves a list of paths into a folder on its own thread. Never touches the tree.
+// Within a volume an item is renamed; to another volume it is copied, and the
+// original is removed only once the whole copy succeeded. An item whose name
+// already exists in the folder is left alone.
+class Mover {
+ public:
+  using Target = PathTarget;
+  struct Result {
+    Node* node;
+    bool gone;  // source path no longer exists
+  };
+  ~Mover();
+  void Start(const std::vector<Target>& targets, const std::string& dest);
+  bool Done() const { return done_.load(); }
+  int Index() const { return index_.load(); }
+  size_t Total() const { return targets_.size(); }
+  uint64_t Moved() const { return moved_.load(); }
+  uint64_t Errors() const { return errors_.load(); }
+  std::string CurrentPath();
+  const std::vector<Result>& Results() const { return results_; }
+
+ private:
+  static void* ThreadMain(void* self);
+  bool Copy(const std::string& src, const std::string& dst, uint64_t dev);
+  void SetCurrent(const std::string& path);
+
+  pthread_t thread_{};
+  bool started_ = false;
+  std::mutex mutex_;
+  std::vector<Target> targets_;
+  std::string dest_;
+  std::vector<Result> results_;
+  std::string current_;
+  std::atomic<bool> done_{false};
+  std::atomic<int> index_{0};
+  std::atomic<uint64_t> moved_{0};
+  std::atomic<uint64_t> errors_{0};
+};
+
+// Removes a file or folder tree, staying on its volume. True when it is gone.
+bool RemoveTree(const std::string& path);
 
 // The biggest regular files below `root`.
 std::vector<Node*> BiggestFiles(Node* root, size_t limit);

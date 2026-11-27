@@ -9,6 +9,8 @@
 #include <mutex>
 #include <sstream>
 
+#include <sys/stat.h>
+
 #include "games.h"
 #include "platform.h"
 #include "system.h"
@@ -19,7 +21,7 @@ namespace {
 
 // ---------------------------------------------------------------- state
 
-enum class Phase { Idle, Scanning, Ready, Deleting };
+enum class Phase { Idle, Scanning, Ready, Deleting, Moving };
 
 struct State {
   std::mutex mu;
@@ -31,8 +33,12 @@ struct State {
   std::vector<Node*> biggest;
   std::unique_ptr<Deleter> deleter;
   uint64_t delete_bytes = 0;
-  // Last finished delete, shown once by the UI.
+  std::unique_ptr<Mover> mover;
+  std::string move_dest;
+  uint64_t move_bytes = 0;
+  // Last finished delete or move, shown once by the UI.
   int result_seq = 0;
+  std::string result_op = "delete";
   uint64_t result_freed = 0, result_errors = 0, result_removed = 0, result_total = 0;
   std::string error;  // last scan error
   // Games tab: every game's folders on every volume, counted on their own thread.
@@ -208,11 +214,117 @@ Node* FindNode(Node* root, const std::string& path) {
   return n;
 }
 
+// True when `path` is strictly inside the folder `dir`.
+bool IsInside(const std::string& path, const std::string& dir) {
+  if (dir == "/") return path.size() > 1 && path[0] == '/';
+  return path.size() > dir.size() && path.compare(0, dir.size(), dir) == 0 && path[dir.size()] == '/';
+}
+
 const GamePart* FindGamePart(const std::string& path) {
   for (const GameTotal& gt : g.games)
     for (const GamePart& part : gt.parts)
       if (part.path == path) return &part;
   return nullptr;
+}
+
+// A cut item to paste, given by path: it may come from an earlier scan of
+// another storage. Only an existing, unprotected entry inside a listed storage
+// other than the system partition (that one only while it is the scanned
+// storage, as for delete), never a volume mounted there.
+bool CutSourceOk(const std::string& path) {
+  if (path.size() < 2 || path[0] != '/' || path.back() == '/') return false;
+  if (path.find("/../") != std::string::npos || path.find("/./") != std::string::npos) return false;
+  if (path.size() >= 3 && (path.compare(path.size() - 3, 3, "/..") == 0 || path.compare(path.size() - 2, 2, "/.") == 0))
+    return false;
+  if (IsProtected(path)) return false;
+  bool listed = false;
+  for (const Storage& st : ListStorages(g_extra))
+    if (st.kind != "system" && IsInside(path, st.path)) listed = true;
+  if (!listed && FindNode(g.root, path)) listed = true;
+  if (!listed) return false;
+  size_t slash = path.find_last_of('/');
+  std::string parent = slash == 0 ? "/" : path.substr(0, slash);
+  struct stat st, pst;
+  return lstat(path.c_str(), &st) == 0 && stat(parent.c_str(), &pst) == 0 && st.st_dev == pst.st_dev;
+}
+
+// What a delete or move request selected: nodes of the scanned tree by id
+// (ids=1,2,3) and game folders on any volume by path (paths=a\nb). A move also
+// takes cut items by path (srcs=a\nb, with their sizes from the scan they were
+// cut in as sizes=1,2). Protected items are dropped, and so is anything inside
+// another selected folder.
+std::vector<PathTarget> SelectedLocked(const Request& req, bool cut = false) {
+  std::vector<std::string> paths;
+  std::vector<std::pair<std::string, uint64_t>> hints;  // cut path -> size
+  auto it = req.query.find("ids");
+  std::string ids = it == req.query.end() ? "" : it->second;
+  size_t pos = 0;
+  while (pos < ids.size()) {
+    size_t c = ids.find(',', pos);
+    if (c == std::string::npos) c = ids.size();
+    Node* n = g.index.Get((uint32_t)std::strtoul(ids.substr(pos, c - pos).c_str(), nullptr, 10));
+    pos = c + 1;
+    if (!n || !n->parent || n->isMount || IsProtected(n->path())) continue;  // never the root
+    paths.push_back(n->path());
+  }
+  it = req.query.find("paths");
+  std::string plist = it == req.query.end() ? "" : it->second;
+  pos = 0;
+  while (pos < plist.size()) {
+    size_t c = plist.find('\n', pos);
+    if (c == std::string::npos) c = plist.size();
+    std::string path = plist.substr(pos, c - pos);
+    pos = c + 1;
+    // Only folders the game count found, never an arbitrary path.
+    if (FindGamePart(path) && !IsProtected(path)) paths.push_back(path);
+  }
+  if (cut) {
+    it = req.query.find("srcs");
+    std::string slist = it == req.query.end() ? "" : it->second;
+    it = req.query.find("sizes");
+    std::string sizes = it == req.query.end() ? "" : it->second;
+    size_t spos = 0;
+    pos = 0;
+    while (pos < slist.size()) {
+      size_t c = slist.find('\n', pos);
+      if (c == std::string::npos) c = slist.size();
+      std::string path = slist.substr(pos, c - pos);
+      pos = c + 1;
+      size_t sc = sizes.find(',', spos);
+      if (sc == std::string::npos) sc = sizes.size();
+      uint64_t size = spos < sizes.size() ? std::strtoull(sizes.substr(spos, sc - spos).c_str(), nullptr, 10) : 0;
+      spos = sc + 1;
+      if (!CutSourceOk(path)) continue;
+      paths.push_back(path);
+      hints.push_back({path, size});
+    }
+  }
+  std::vector<PathTarget> top;
+  for (const std::string& path : paths) {
+    bool covered = false;
+    for (const std::string& q : paths)
+      if (q != path && IsInside(path, q)) covered = true;
+    bool dup = false;
+    for (const auto& t : top) dup = dup || t.path == path;
+    if (covered || dup) continue;
+    PathTarget t{path, FindNode(g.root, path)};
+    if (t.node) t.size = t.node->size;
+    else if (const GamePart* part = FindGamePart(path)) t.size = part->size;
+    else
+      for (const auto& h : hints)
+        if (h.first == path) t.size = h.second;
+    top.push_back(t);
+  }
+  return top;
+}
+
+// A folder items may be moved into: a storage on the list (not the system
+// partition), or an unprotected folder of the scanned tree.
+bool MoveDestinationOk(const std::string& dest) {
+  for (const Storage& st : ListStorages(g_extra))
+    if (st.path == dest) return st.kind != "system";
+  Node* n = FindNode(g.root, dest);
+  return n && n->isDir && !n->isMount && !IsProtected(dest);
 }
 
 std::string GamesJson() {
@@ -288,6 +400,32 @@ void FinishScanLocked() {
   Log("scan done: %llu items, %llu bytes", (unsigned long long)items, (unsigned long long)r->size);
 }
 
+// Scan `n` again after files in it changed, and fix the sizes above it.
+void RescanLocked(Node* n) {
+  Node* fresh = Scanner::ScanSync(n->path());
+  int64_t dsize = (int64_t)fresh->size - (int64_t)n->size;
+  int64_t dfiles = (int64_t)fresh->files - (int64_t)n->files;
+  for (Node* c : n->children) {
+    g.index.Remove(c);
+    delete c;
+  }
+  n->children = std::move(fresh->children);
+  fresh->children.clear();
+  for (Node* c : n->children) {
+    c->parent = n;
+    g.index.Add(c);
+  }
+  n->size = fresh->size;
+  n->files = fresh->files;
+  n->error = n->error || fresh->error;
+  delete fresh;
+  for (Node* a = n->parent; a; a = a->parent) {
+    a->size = (uint64_t)std::max<int64_t>(0, (int64_t)a->size + dsize);
+    a->files = (uint64_t)std::max<int64_t>(0, (int64_t)a->files + dfiles);
+  }
+  ResortUp(n);
+}
+
 void FinishDeleteLocked() {
   auto results = g.deleter->Results();
   g.result_freed = g.deleter->Freed();
@@ -307,31 +445,10 @@ void FinishDeleteLocked() {
       g.result_removed++;
       continue;
     }
-    // Partly deleted: rescan just this subtree.
-    Node* fresh = Scanner::ScanSync(n->path());
-    int64_t dsize = (int64_t)fresh->size - (int64_t)n->size;
-    int64_t dfiles = (int64_t)fresh->files - (int64_t)n->files;
-    for (Node* c : n->children) {
-      g.index.Remove(c);
-      delete c;
-    }
-    n->children = std::move(fresh->children);
-    fresh->children.clear();
-    for (Node* c : n->children) {
-      c->parent = n;
-      g.index.Add(c);
-    }
-    n->size = fresh->size;
-    n->files = fresh->files;
-    n->error = n->error || fresh->error;
-    delete fresh;
-    for (Node* a = n->parent; a; a = a->parent) {
-      a->size = (uint64_t)std::max<int64_t>(0, (int64_t)a->size + dsize);
-      a->files = (uint64_t)std::max<int64_t>(0, (int64_t)a->files + dfiles);
-    }
-    ResortUp(n);
+    RescanLocked(n);  // partly deleted
   }
   g.biggest = BiggestFiles(g.root, 500);
+  g.result_op = "delete";
   g.result_seq++;
   g.phase = Phase::Ready;
   QuerySpace(g.storage.path, &g.storage.total, &g.storage.free);
@@ -340,9 +457,41 @@ void FinishDeleteLocked() {
       (unsigned long long)g.result_errors);
 }
 
+void FinishMoveLocked() {
+  auto results = g.mover->Results();
+  g.result_freed = g.mover->Moved();
+  g.result_errors = g.mover->Errors();
+  g.result_total = results.size();
+  g.result_removed = 0;
+  g.mover.reset();
+  for (auto& res : results) {
+    Node* n = res.node;
+    if (res.gone) g.result_removed++;
+    if (!n) continue;  // on another volume: not in the tree
+    if (res.gone && n->parent) {
+      g.index.Remove(n);
+      DetachAndFree(n);
+    } else {
+      RescanLocked(n);  // partly moved
+    }
+  }
+  // The folder the items went to, when it is part of this scan.
+  if (Node* d = FindNode(g.root, g.move_dest)) RescanLocked(d);
+  g.biggest = BiggestFiles(g.root, 500);
+  g.result_op = "move";
+  g.result_seq++;
+  g.phase = Phase::Ready;
+  QuerySpace(g.storage.path, &g.storage.total, &g.storage.free);
+  StartGamesLocked();
+  Log("move done: %llu of %llu items, %llu bytes, %llu errors", (unsigned long long)g.result_removed,
+      (unsigned long long)g.result_total, (unsigned long long)g.result_freed,
+      (unsigned long long)g.result_errors);
+}
+
 void PollLocked() {
   if (g.phase == Phase::Scanning && g.scanner && g.scanner->Done()) FinishScanLocked();
   if (g.phase == Phase::Deleting && g.deleter && g.deleter->Done()) FinishDeleteLocked();
+  if (g.phase == Phase::Moving && g.mover && g.mover->Done()) FinishMoveLocked();
   if (g.game_scanner && g.game_scanner->Done()) {
     g.games = g.game_scanner->Take();
     g.game_scanner.reset();
@@ -357,6 +506,7 @@ const char* PhaseName(Phase p) {
     case Phase::Scanning: return "scanning";
     case Phase::Ready: return "ready";
     case Phase::Deleting: return "deleting";
+    case Phase::Moving: return "moving";
   }
   return "idle";
 }
@@ -457,12 +607,16 @@ void ApiHandle(const Request& req, Response& res) {
       o << ",\"index\":" << g.deleter->Index() << ",\"total\":" << g.deleter->Total()
         << ",\"freed\":" << g.deleter->Freed() << ",\"goal\":" << g.delete_bytes
         << ",\"current\":" << Str(g.deleter->CurrentPath());
-    o << ",\"result\":{\"seq\":" << g.result_seq << ",\"freed\":" << g.result_freed
+    if (g.mover)
+      o << ",\"index\":" << g.mover->Index() << ",\"total\":" << g.mover->Total()
+        << ",\"moved\":" << g.mover->Moved() << ",\"goal\":" << g.move_bytes
+        << ",\"dest\":" << Str(g.move_dest) << ",\"current\":" << Str(g.mover->CurrentPath());
+    o << ",\"result\":{\"op\":" << Str(g.result_op) << ",\"seq\":" << g.result_seq << ",\"freed\":" << g.result_freed
       << ",\"errors\":" << g.result_errors << ",\"removed\":" << g.result_removed
       << ",\"total\":" << g.result_total << "}}";
     Json(res, 200, o.str());
   } else if (p == "/api/scan" && req.method == "POST") {
-    if (g.phase == Phase::Scanning || g.phase == Phase::Deleting) {
+    if (g.phase == Phase::Scanning || g.phase == Phase::Deleting || g.phase == Phase::Moving) {
       Error(res, 409, "busy");
       return;
     }
@@ -512,54 +666,71 @@ void ApiHandle(const Request& req, Response& res) {
       Error(res, 409, "busy");
       return;
     }
-    // Nodes of the scanned tree by id, and game folders (any volume) by path.
-    std::vector<std::string> paths;
-    auto it = req.query.find("ids");
-    std::string ids = it == req.query.end() ? "" : it->second;
-    size_t pos = 0;
-    while (pos < ids.size()) {
-      size_t c = ids.find(',', pos);
-      if (c == std::string::npos) c = ids.size();
-      Node* n = g.index.Get((uint32_t)std::strtoul(ids.substr(pos, c - pos).c_str(), nullptr, 10));
-      pos = c + 1;
-      if (!n || !n->parent || n->isMount || IsProtected(n->path())) continue;  // never the root
-      paths.push_back(n->path());
-    }
-    it = req.query.find("paths");
-    std::string plist = it == req.query.end() ? "" : it->second;
-    pos = 0;
-    while (pos < plist.size()) {
-      size_t c = plist.find('\n', pos);
-      if (c == std::string::npos) c = plist.size();
-      std::string path = plist.substr(pos, c - pos);
-      pos = c + 1;
-      // Only folders the game count found, never an arbitrary path.
-      if (FindGamePart(path) && !IsProtected(path)) paths.push_back(path);
-    }
-    // A selected folder already covers anything selected inside it.
-    std::vector<Deleter::Target> top;
-    for (const std::string& path : paths) {
-      bool covered = false;
-      for (const std::string& q : paths)
-        if (q != path && path.compare(0, q.size(), q) == 0 && path.size() > q.size() && path[q.size()] == '/')
-          covered = true;
-      bool dup = false;
-      for (const auto& t : top) dup = dup || t.path == path;
-      if (!covered && !dup) top.push_back({path, FindNode(g.root, path)});
-    }
+    std::vector<PathTarget> top = SelectedLocked(req);
     if (top.empty()) {
       Error(res, 400, "nothing deletable selected");
       return;
     }
     g.delete_bytes = 0;
     for (const auto& t : top) {
-      if (t.node) g.delete_bytes += t.node->size;
-      else if (const GamePart* part = FindGamePart(t.path)) g.delete_bytes += part->size;
+      g.delete_bytes += t.size;
       Log("delete: %s", t.path.c_str());
     }
     g.deleter = std::make_unique<Deleter>();
     g.deleter->Start(top);
     g.phase = Phase::Deleting;
+    Json(res, 200, "{\"ok\":true,\"count\":" + Num(top.size()) + "}");
+  } else if (p == "/api/move" && req.method == "POST") {
+    if (g.phase != Phase::Ready) {
+      Error(res, 409, "busy");
+      return;
+    }
+    auto it = req.query.find("dest");
+    std::string dest = it == req.query.end() ? "" : it->second;
+    while (dest.size() > 1 && dest.back() == '/') dest.pop_back();
+    if (dest.empty() || !MoveDestinationOk(dest)) {
+      Error(res, 400, "Items cannot be moved to this folder");
+      return;
+    }
+    // Leave out what is already there, and never a folder into itself.
+    std::vector<PathTarget> top;
+    for (const PathTarget& t : SelectedLocked(req, true)) {
+      if (dest == t.path || IsInside(dest, t.path)) {
+        Error(res, 400, "A folder cannot be moved into itself");
+        return;
+      }
+      size_t slash = t.path.find_last_of('/');
+      std::string parent = slash == 0 ? "/" : t.path.substr(0, slash);
+      if (parent != dest) top.push_back(t);
+    }
+    if (top.empty()) {
+      Error(res, 400, "Nothing to move: the items are already in this folder, or no longer exist");
+      return;
+    }
+    // Moving to another volume copies the data: it has to fit there.
+    struct stat dst;
+    uint64_t need = 0, total = 0, free = 0;
+    if (stat(dest.c_str(), &dst) != 0) {
+      Error(res, 400, "Destination folder not found");
+      return;
+    }
+    for (const PathTarget& t : top) {
+      struct stat sst;
+      if (lstat(t.path.c_str(), &sst) == 0 && sst.st_dev != dst.st_dev) need += t.size;
+    }
+    if (need && QuerySpace(dest, &total, &free) && need > free) {
+      Json(res, 400, "{\"error\":\"not enough space\",\"need\":" + Num(need) + ",\"free\":" + Num(free) + "}");
+      return;
+    }
+    g.move_bytes = 0;
+    for (const PathTarget& t : top) {
+      g.move_bytes += t.size;
+      Log("move: %s -> %s", t.path.c_str(), dest.c_str());
+    }
+    g.move_dest = dest;
+    g.mover = std::make_unique<Mover>();
+    g.mover->Start(top, dest);
+    g.phase = Phase::Moving;
     Json(res, 200, "{\"ok\":true,\"count\":" + Num(top.size()) + "}");
   } else if (p == "/api/quit" && req.method == "POST") {
     Log("quit requested");

@@ -1,13 +1,15 @@
 // Disk Space Analyzer web UI.
 //
-// Screens: home (pick storage) -> scanning -> browse (select) -> review -> deleting.
+// Screens: home (pick storage) -> scanning -> browse (select) -> review -> deleting
+// or moving. Cut (review screen or menu) keeps the items; Triangle (or the menu)
+// pastes them into the open folder. Move to sends them to another storage.
 // Browse has three tabs: Folders, Biggest Files, Games (each game's folders on
 // every volume, added up).
 //
 // Input, all mapped to the same actions:
 //   D-pad / arrow keys      move focus          Cross / Enter      open, confirm
 //   Circle / Esc / browser back                  back
-//   Square / Space          select             Triangle / Tab     review & clean
+//   Square / Space          select             Triangle / Tab     review & clean, paste
 //   L1 R1 / Q E             switch tab         L2 R2 / PgUp PgDn  page
 //   Options / M             menu
 //   Left stick / mouse      cursor: hover focuses, Cross/click acts on what is under it
@@ -44,7 +46,7 @@ async function api(path, method = 'GET', body) {
   const r = await fetch(path, opt);
   let j = {};
   try { j = await r.json(); } catch (e) { /* empty body */ }
-  if (!r.ok) { const e = new Error(j.error || 'HTTP ' + r.status); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(j.error || 'HTTP ' + r.status); e.status = r.status; e.data = j; throw e; }
   return j;
 }
 
@@ -152,13 +154,20 @@ const S = {
   game: null, pfocus: 0, pscroll: 0,                  // ... and the open game's folders
   gpart: null, gnode: null, nfocus: 0, nscroll: 0,    // ... and a folder browsed inside one of them
   marked: new Map(),  // path -> item
-  rfocus: 0, rscroll: 0, rbutton: false,
+  rfocus: 0, rscroll: 0,
+  rbtn: -1,           // review: focused button (RBTN), -1 = the list
+  clip: null,         // cut items waiting for a destination folder, on any storage
+  clipFrom: null,     // ... and the storage they were cut on
+  clipMode: 'cut',    // 'cut' (Cut, Paste) or 'move' (Move to, Move here)
   dialog: null,
   cursor: false,      // the pointer (left stick / mouse) is in use
   hover: null,        // chart segment under the pointer
   scan: null,         // progress while scanning / deleting
   resultSeq: 0,
 };
+
+// Review screen buttons: Cut, Move to and Clear side by side, Delete below.
+const RBTN = { cut: 0, move: 1, clear: 2, del: 3 };
 
 let loadToken = 0;
 let scanCancelled = false;
@@ -372,6 +381,7 @@ function toggleGame(g) {
 
 function toggleMark(item) {
   if (!item) return;
+  if (S.clip && S.screen !== 'review') { toast(`${S.clipMode === 'move' ? 'Move' : 'Paste'} the waiting items first, or cancel in the Options menu`); return; }
   if (item.kind === 'game') { toggleGame(item); return; }
   if (S.marked.has(item.path)) {
     S.marked.delete(item.path);
@@ -453,7 +463,7 @@ function openReview() {
   if (!S.marked.size) { toast('Nothing selected yet: press Square on an item'); return; }
   S.screen = 'review';
   S.rfocus = S.rscroll = 0;
-  S.rbutton = false;
+  S.rbtn = -1;
   render();
 }
 
@@ -498,14 +508,7 @@ async function pollDelete() {
   }
   const r = st.result;
   S.marked.clear();
-  S.storage = st.storage;
-  S.resultSeq = r.seq;
-  S.screen = 'browse';
-  S.rootNode = null;
-  loadGames();
-  await loadBiggest();
-  await openNode(S.node ? S.node.id : S.rootId, null);
-  if (S.gnode) openGameNode(S.gnode.id);
+  await reloadAfterChange(st);
   showDialog({
     title: r.errors ? 'Cleanup finished with problems' : 'Cleanup complete',
     lines: [`Freed ${fmtSize(r.freed)}.`, `${fmtCount(r.removed)} of ${fmtCount(r.total)} selected items removed.`],
@@ -514,42 +517,214 @@ async function pollDelete() {
   });
 }
 
+// ---------------------------------------------------------------- move
+
+const clipBytes = () => (S.clip || []).reduce((t, m) => t + m.size, 0);
+
+// Keep the selection to move into a folder picked afterwards.
+function cutSelection() {
+  const list = markedList();
+  if (!list.length) return;
+  S.clip = list;
+  S.clipFrom = S.storage ? { path: S.storage.path, name: S.storage.name } : null;
+  S.clipMode = 'cut';
+  S.marked.clear();
+  S.screen = 'browse';
+  if (S.tab === 1) S.tab = 0;
+  render();
+  toast(`Cut ${fmtCount(list.length)}: open a folder on any storage, then press Triangle to paste`);
+}
+
+function cancelCut() {
+  toast(S.clipMode === 'move' ? 'Move cancelled' : 'Cut cancelled');
+  S.clip = null;
+  render();
+}
+
+// The folder on screen, when cut items can go there.
+function pasteFolder() {
+  if (S.tab === 0 && S.node) return S.node;
+  if (S.tab === 2 && S.gnode) return S.gnode;
+  return null;
+}
+
+function pasteHere() {
+  const n = pasteFolder();
+  if (!n) { toast('Open a folder in the Folders tab to paste the items there'); return; }
+  if (n.protected && n.id !== S.rootId) { toast('Protected system location: items cannot be moved here'); return; }
+  if (S.clip.some((m) => n.path === m.path || n.path.startsWith(m.path + '/'))) {
+    toast('A folder cannot be moved into itself');
+    return;
+  }
+  askMove(S.clip, n.path, nodeName(n), () => { S.clip = null; },
+          { paste: true, verb: S.clipMode === 'move' ? 'Move' : 'Paste', from: S.clipFrom, to: S.storage });
+}
+
+// Move the selection to another storage: pick one from the list.
+// Move the selection: pick a storage (this one too), then a folder on it;
+// Triangle moves the items there. Uses the same waiting list as Cut.
+async function askMoveTo() {
+  const list = markedList();
+  if (!list.length) return;
+  await loadStorages();
+  const cur = S.storage ? S.storage.path : '';
+  const targets = S.storages.filter((s) => s.kind !== 'system')
+    .sort((a, b) => (b.path === cur) - (a.path === cur));
+  if (!targets.length) return;
+  showDialog({
+    title: 'Move to',
+    lines: [`Choose the storage for the ${fmtCount(list.length)} selected ${list.length === 1 ? 'item' : 'items'} (${fmtSize(markedBytes())}), then pick a folder on it.`],
+    vertical: true,
+    buttons: targets.map((t) => `${t.name}${t.path === cur ? ' (this storage)' : ''} · ${fmtSize(t.free)} free`).concat(['Cancel']),
+    cancel: targets.length,
+    onChoose: (i) => { if (i < targets.length) pickMoveFolder(list, targets[i]); },
+  });
+}
+
+function pickMoveFolder(list, target) {
+  S.clip = list;
+  S.clipFrom = S.storage ? { path: S.storage.path, name: S.storage.name } : null;
+  S.clipMode = 'move';
+  S.marked.clear();
+  if (S.storage && target.path === S.storage.path) {
+    S.screen = 'browse';
+    S.tab = 0;
+    openNode(S.rootId);
+  } else {
+    startScan(target);
+  }
+  toast('Open the folder to move to, then press Triangle');
+}
+
+// opt.paste: waiting items (sent by path); opt.verb: Move or Paste;
+// opt.from / opt.to: source and destination storages.
+function askMove(list, dest, destName, onStart, opt) {
+  const paste = opt.paste, verb = opt.verb || 'Move';
+  let files = 0, bytes = 0, warn = '';
+  for (const m of list) { files += m.files; bytes += m.size; if (!warn && m.warn) warn = m.warn; }
+  const lines = [`${fmtSize(bytes)} in ${fmtCount(files)} files will be moved to ${dest}.`];
+  const cross = !!(opt.from && opt.to && opt.from.path !== opt.to.path);
+  if (cross)
+    lines.push('Moving to another storage copies the data first, then removes the original. This can take a while.');
+  showDialog({
+    title: `${verb} ${fmtCount(list.length)} ${list.length === 1 ? 'item' : 'items'} into ${destName}?`,
+    lines, warning: warn,
+    buttons: ['Cancel', verb], cancel: 0, focus: 1,
+    onChoose: (i) => { if (i === 1) runMove(list, dest, destName, onStart, cross ? opt.from : null, paste); },
+  });
+}
+
+// from: the source storage when the move leaves it (to report the space freed).
+async function runMove(list, dest, destName, onStart, from, paste) {
+  let body = 'dest=' + encodeURIComponent(dest);
+  if (paste) {
+    // Cut items may come from an earlier scan, maybe of another storage: by path.
+    body += '&srcs=' + encodeURIComponent(list.map((m) => m.path).join('\n')) + '&sizes=' + list.map((m) => m.size).join(',');
+  } else {
+    const ids = list.filter((m) => typeof m.id === 'number').map((m) => m.id);
+    const paths = list.filter((m) => typeof m.id !== 'number').map((m) => m.path);
+    body += '&ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
+  }
+  try { await api('/api/move', 'POST', body); } catch (e) {
+    if (e.data && e.data.need) toast(`Not enough space on ${destName}: needs ${fmtSize(e.data.need)}, ${fmtSize(e.data.free)} free`);
+    else toast('Move failed to start: ' + e.message);
+    return;
+  }
+  if (onStart) onStart();
+  // Only a move to another storage frees space on the source.
+  const src = from && S.storages.find((x) => x.path === from.path);
+  S.moveFrom = src ? { path: src.path, name: src.name, free: src.free } : null;
+  S.moveTo = destName;
+  S.screen = 'moving';
+  S.scan = { index: 0, total: list.length, moved: 0, goal: list.reduce((t, m) => t + m.size, 0), current: '', dest };
+  render();
+  pollMove();
+}
+
+async function pollMove() {
+  let st;
+  try { st = await api('/api/status'); } catch (e) { setTimeout(pollMove, 1000); return; }
+  if (st.phase === 'moving') {
+    S.scan = st;
+    render();
+    setTimeout(pollMove, 300);
+    return;
+  }
+  const r = st.result;
+  const from = S.moveFrom;
+  await reloadAfterChange(st);
+  const lines = [`${fmtCount(r.removed)} of ${fmtCount(r.total)} items moved${S.moveTo ? ' to ' + S.moveTo : ''}.`];
+  let freed = 0;
+  if (from) {
+    await loadStorages();
+    const now = S.storages.find((x) => x.path === from.path);
+    if (now) freed = now.free - from.free;
+  }
+  if (freed > 0) lines.push(`Freed ${fmtSize(freed)} on ${from.name}.`);
+  showDialog({
+    title: r.errors ? 'Move finished with problems' : 'Move complete',
+    lines,
+    warning: r.errors ? `${fmtCount(r.errors)} items could not be moved (a file with that name exists there, in use, or read-only).` : '',
+    buttons: ['OK'],
+  });
+}
+
+// Files changed on disk: fetch the folder, biggest files and games again.
+async function reloadAfterChange(st) {
+  S.storage = st.storage;
+  S.resultSeq = st.result.seq;
+  S.screen = 'browse';
+  S.rootNode = null;
+  loadGames();
+  await loadBiggest();
+  await openNode(S.node ? S.node.id : S.rootId, null);
+  if (S.gnode) openGameNode(S.gnode.id);
+}
+
 function openMenu() {
+  const items = [['Rescan ' + (S.storage ? S.storage.name : ''), () => S.storage && startScan(S.storage)]];
+  if (S.clip) {
+    const n = fmtCount(S.clip.length);
+    const move = S.clipMode === 'move';
+    items.push([`${move ? 'Move' : 'Paste'} ${n} ${S.clip.length === 1 ? 'item' : 'items'} here`, pasteHere],
+               [`Cancel ${move ? 'move' : 'cut'} (${n} items)`, cancelCut]);
+  } else if (S.marked.size) {
+    items.push([`Cut ${fmtCount(S.marked.size)} selected`, cutSelection],
+               ['Move selected to…', askMoveTo],
+               ['Clear selection', clearSelection]);
+  }
+  items.push(['Choose another storage', leaveScan], ['Settings', openSettings],
+             ['Stop Disk Space Analyzer', stopPayload], ['Close', null]);
   showDialog({
     title: 'Menu',
     vertical: true,
-    buttons: ['Rescan ' + (S.storage ? S.storage.name : ''), 'Clear selection', 'Choose another storage',
-              'Settings', 'Stop Disk Space Analyzer', 'Close'],
-    cancel: 5,
-    onChoose: (i) => {
-      if (i === 0 && S.storage) startScan(S.storage);
-      if (i === 1) { S.marked.clear(); toast('Selection cleared'); render(); }
-      if (i === 2) leaveScan();
-      if (i === 3) openSettings();
-      if (i === 4) stopPayload();
-    },
+    buttons: items.map((x) => x[0]),
+    cancel: items.length - 1,
+    onChoose: (i) => { if (items[i][1]) items[i][1](); },
   });
 }
 
 function openHomeMenu() {
+  const items = [['Refresh storage list', () => loadStorages().then(() => { render(); toast('Storage list refreshed'); })]];
+  if (S.clip) items.push([`Cancel ${S.clipMode === 'move' ? 'move' : 'cut'} (${fmtCount(S.clip.length)} items)`, cancelCut]);
+  items.push(['Settings', openSettings], ['Close', null]);
   showDialog({
     title: 'Menu',
     vertical: true,
-    buttons: ['Refresh storage list', 'Settings', 'Close'],
-    cancel: 2,
-    onChoose: (i) => {
-      if (i === 0) loadStorages().then(() => { render(); toast('Storage list refreshed'); });
-      if (i === 1) openSettings();
-    },
+    buttons: items.map((x) => x[0]),
+    cancel: items.length - 1,
+    onChoose: (i) => { if (items[i][1]) items[i][1](); },
   });
 }
 
 function leaveScan() {
+  // Cut items stay: they can be pasted on another storage.
   const go = async () => { S.screen = 'home'; S.marked.clear(); await loadStorages(); render(); };
-  if (!S.marked.size) { go(); return; }
+  const n = S.marked.size;
+  if (!n) { go(); return; }
   showDialog({
     title: 'Leave this scan?',
-    lines: ['You will return to the storage list.', `Your selection of ${fmtCount(S.marked.size)} items will be cleared.`],
+    lines: ['You will return to the storage list.', `Your selection of ${fmtCount(n)} items will be cleared.`],
     buttons: ['Stay', 'Leave'], cancel: 0,
     onChoose: (i) => { if (i === 1) go(); },
   });
@@ -685,7 +860,7 @@ function homeInput(a) {
 function browseInput(a) {
   if (a === 'tabprev' || a === 'tabnext') { S.tab = (S.tab + (a === 'tabnext' ? 1 : 2)) % 3; S.hover = null; render(); return; }
   if (a === 'menu') { openMenu(); return; }
-  if (a === 'review') { openReview(); return; }
+  if (a === 'review') { if (S.clip) pasteHere(); else openReview(); return; }
   if (S.tab === 2) { gamesInput(a); return; }
   if (S.tab === 1) {
     const n = S.biggest.length;
@@ -754,20 +929,38 @@ function gamesInput(a) {
   render();
 }
 
+function reviewAction(b) {
+  if (b === RBTN.cut) cutSelection();
+  else if (b === RBTN.move) askMoveTo();
+  else if (b === RBTN.clear) clearSelection();
+  else askDelete();
+}
+
+function clearSelection() {
+  S.marked.clear();
+  S.screen = 'browse';
+  render();
+  toast('Selection cleared');
+}
+
+// Focus moves from the list to the buttons on the right:
+//   [Cut] [Move to] [Clear]
+//   [Delete permanently]
 function reviewInput(a) {
   const list = markedList();
-  if (a === 'up' && !S.rbutton) S.rfocus--;
-  else if (a === 'down' && !S.rbutton) S.rfocus++;
+  const b = S.rbtn, inList = b < 0;
+  if (a === 'up') { if (inList) S.rfocus--; else if (b === RBTN.del) S.rbtn = RBTN.cut; }
+  else if (a === 'down') { if (inList) S.rfocus++; else if (b !== RBTN.del) S.rbtn = RBTN.del; }
   else if (a === 'pageup') S.rfocus -= VIS;
   else if (a === 'pagedown') S.rfocus += VIS;
-  else if (a === 'right') S.rbutton = true;
-  else if (a === 'left') S.rbutton = false;
+  else if (a === 'right') { if (inList) S.rbtn = RBTN.cut; else if (b < RBTN.clear) S.rbtn = b + 1; }
+  else if (a === 'left') S.rbtn = b === RBTN.move || b === RBTN.clear ? b - 1 : -1;
   else if (a === 'back') { S.screen = 'browse'; render(); return; }
-  else if (a === 'mark' && !S.rbutton && list[S.rfocus]) {
+  else if (a === 'mark' && inList && list[S.rfocus]) {
     toggleMark(list[S.rfocus]);
     if (!S.marked.size) { S.screen = 'browse'; render(); return; }
   } else if (a === 'confirm') {
-    if (S.rbutton) askDelete();
+    if (!inList) reviewAction(b);
     else if (list[S.rfocus]) revealPath(list[S.rfocus]);
     return;
   } else if (a === 'review') { askDelete(); return; }
@@ -798,7 +991,7 @@ function act(el) {
       break;
     }
     case 'row':
-      if (S.screen === 'review') { S.rfocus = i; S.rbutton = false; revealPath(markedList()[i]); break; }
+      if (S.screen === 'review') { S.rfocus = i; S.rbtn = -1; revealPath(markedList()[i]); break; }
       if (S.tab === 1) { S.bfocus = i; reveal(S.biggest[i].id, S.biggest[i].parentId); break; }
       if (S.tab === 2) {
         if (S.gnode) {
@@ -844,7 +1037,7 @@ function act(el) {
     case 'gpcrumb': closePart(); break;
     case 'gncrumb': openGameNode(i); break;
     case 'hint': input(el.dataset.a, 'click'); break;
-    case 'delbtn': askDelete(); break;
+    case 'rbtn': S.rbtn = i; reviewAction(i); break;
     case 'dlg':
       if (S.dialog && S.dialog.settings) closeDialog(null);
       else if (S.dialog && i !== S.dialog.hold) closeDialog(i);
@@ -861,14 +1054,14 @@ function hover(el) {
   let changed = false;
   if (k === 'storage' && S.hfocus !== i) { S.hfocus = i; changed = true; }
   if (k === 'row' || k === 'check') {
-    if (S.screen === 'review') { if (S.rfocus !== i || S.rbutton) { S.rfocus = i; S.rbutton = false; changed = true; } }
+    if (S.screen === 'review') { if (S.rfocus !== i || S.rbtn >= 0) { S.rfocus = i; S.rbtn = -1; changed = true; } }
     else if (S.tab === 1) { if (S.bfocus !== i) { S.bfocus = i; changed = true; } }
     else if (S.tab === 2) {
       const fk = S.gnode ? 'nfocus' : S.game ? 'pfocus' : 'gfocus';
       if (S[fk] !== i) { S[fk] = i; changed = true; }
     } else if (S.focus !== i) { S.focus = i; changed = true; }
   }
-  if (k === 'delbtn' && !S.rbutton) { S.rbutton = true; changed = true; }
+  if (k === 'rbtn' && S.rbtn !== i) { S.rbtn = i; changed = true; }
   if (k === 'dlg' && S.dialog && S.dialog.settings) i = SETTINGS.length;
   if ((k === 'dlg' || k === 'set' || k === 'setv') && S.dialog && S.dialog.focus !== i) {
     S.dialog.focus = i; stopHold(); changed = true;
@@ -1130,8 +1323,9 @@ function render() {
   let hints = '';
   switch (S.screen) {
     case 'home': [html, hints] = renderHome(); break;
-    case 'scanning': [html, hints] = renderProgress(false); break;
-    case 'deleting': [html, hints] = renderProgress(true); break;
+    case 'scanning': [html, hints] = renderProgress('scan'); break;
+    case 'deleting': [html, hints] = renderProgress('delete'); break;
+    case 'moving': [html, hints] = renderProgress('move'); break;
     case 'browse': [html, hints] = renderBrowse(); break;
     case 'review': [html, hints] = renderReview(); break;
     default: break;
@@ -1191,14 +1385,29 @@ function renderHome() {
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  return [h, hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('triangle', 'Settings', 'review') +
-             hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor')];
+  let hints = hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('triangle', 'Settings', 'review') +
+              hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor');
+  if (S.clip) {
+    hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
+      &middot; scan a storage, open a folder</div></div>`;
+  }
+  return [h, hints];
 }
 
-function renderProgress(deleting) {
+function renderProgress(op) {
   const p = S.scan || {};
   let h;
-  if (!deleting) {
+  if (op === 'move') {
+    const frac = p.goal ? Math.min(1, (p.moved || 0) / p.goal) : 0;
+    h = `<div class="abs spinner"></div>
+      <div class="abs spin-label">${fmtSize(Math.min(p.moved || 0, p.goal || Infinity))}</div>
+      <div class="abs big-label">Moving to ${esc(S.moveTo || p.dest || '')}&hellip;</div>
+      <div class="abs mid-label">Item ${Math.min((p.index || 0) + 1, p.total || 1)} of ${p.total || 1} &middot; ${fmtSize(p.goal || 0)} in all</div>
+      <div class="abs progress"><i class="move" style="width:${(frac * 100).toFixed(1)}%"></i></div>
+      <div class="abs path-label ellipsis">${esc(p.current || '')}</div>`;
+    return [h, '<div class="muted">Please wait, do not turn off the console or unplug the drive.</div>'];
+  }
+  if (op === 'scan') {
     h = `<div class="abs spinner"></div>
       <div class="abs spin-label">${fmtSize(p.bytes || 0)}</div>
       <div class="abs big-label">Scanning ${esc(S.storage ? S.storage.name : '')}</div>
@@ -1400,11 +1609,19 @@ function renderBrowse() {
       hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor')
     : hint('cross', 'Show in folder', 'confirm') + hint('square', 'Select', 'mark') + hint('options', 'Menu', 'menu') +
       hint('lstick', 'Cursor');
-  if (S.marked.size) {
+  if (S.clip) {
+    const n = S.clip.length;
+    const verb = S.clipMode === 'move' ? 'Move' : 'Paste';
+    const label = pasteFolder() ? `${verb} ${fmtCount(n)} ${n === 1 ? 'item' : 'items'} here`
+                                : `${fmtCount(n)} waiting · open a folder to ${verb.toLowerCase()}`;
+    const from = S.clipFrom && S.storage && S.clipFrom.path !== S.storage.path ? ` from ${S.clipFrom.name}` : '';
+    hints += `<div class="hint-right"><div class="pill move" data-act="hint" data-a="review">${GLYPH.triangle}
+      ${esc(label + from)} &middot; ${fmtSize(clipBytes())}</div></div>`;
+  } else if (S.marked.size) {
     hints += `<div class="hint-right"><div class="pill" data-act="hint" data-a="review">${GLYPH.triangle}
-      ${fmtCount(S.marked.size)} selected &middot; ${fmtSize(markedBytes())} &nbsp; Review &amp; clean</div></div>`;
+      ${fmtCount(S.marked.size)} selected &middot; ${fmtSize(markedBytes())} &nbsp; Review</div></div>`;
   } else {
-    hints += `<div class="hint-right muted">${glyphText('Press Square to select items to delete')}</div>`;
+    hints += `<div class="hint-right muted">${glyphText('Press Square to select items to delete or move')}</div>`;
   }
   return [h, hints];
 }
@@ -1477,7 +1694,7 @@ function renderReview() {
     <div class="abs panel-title">Selected items</div>
     <div class="abs panel-meta">${fmtCount(list.length)} items</div><div class="abs rows">`;
   for (let i = S.rscroll; i < list.length && i < S.rscroll + VIS; i++)
-    h += row(list[i], i, !S.rbutton && i === S.rfocus, 2, 0);
+    h += row(list[i], i, S.rbtn < 0 && i === S.rfocus, 2, 0);
   h += '</div>' + scrollbar(S.rscroll, list.length);
 
   const bytes = markedBytes();
@@ -1494,9 +1711,12 @@ function renderReview() {
       <div class="row2"><b>${fmtSize(st.free + bytes)} available</b><span>now ${fmtSize(st.free)}</span></div></div>`;
   }
   if (warns.length) h += `<div class="abs warns">${warns.map((w) => `<div>${esc(w)}</div>`).join('')}</div>`;
-  h += `<div class="abs delbtn${S.rbutton ? ' focus' : ''}" data-act="delbtn">${GLYPH.triangle}<span>Delete permanently</span></div>`;
-  return [h, hint('square', 'Unselect', 'mark') + hint('triangle', 'Delete', 'review') + hint('cross', 'Show', 'confirm') +
-             hint('circle', 'Back', 'back') + hint('dpad', 'Right: button')];
+  const rb = (b, cls, label, glyph) =>
+    `<div class="abs rbtn ${cls}${S.rbtn === b ? ' focus' : ''}" data-act="rbtn" data-i="${b}">${glyph || ''}<span>${label}</span></div>`;
+  h += rb(RBTN.cut, 'cutbtn', 'Cut') + rb(RBTN.move, 'movebtn', 'Move to&hellip;') + rb(RBTN.clear, 'clearbtn', 'Clear') +
+       rb(RBTN.del, 'delbtn', 'Delete permanently', GLYPH.triangle);
+  return [h, hint('square', 'Unselect', 'mark') + hint('triangle', 'Delete', 'review') + hint('cross', S.rbtn < 0 ? 'Show' : 'Choose', 'confirm') +
+             hint('circle', 'Back', 'back') + hint('dpad', 'Right: Cut, Move, Clear, Delete')];
 }
 
 function renderDialog() {
@@ -1576,6 +1796,12 @@ async function start() {
     S.scan = st;
     render();
     pollDelete();
+  } else if (st && st.phase === 'moving') {
+    S.storage = st.storage;
+    S.screen = 'moving';
+    S.scan = st;
+    render();
+    pollMove();
   } else if (st && st.phase === 'ready' && st.root != null) {
     await enterBrowse(st);
   } else {
