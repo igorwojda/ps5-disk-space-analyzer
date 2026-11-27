@@ -15,7 +15,7 @@
 // L2 F7, R2 F8. Left unhandled, L1 makes the browser go back.
 'use strict';
 
-const VIS = 10;            // list rows on screen
+let VIS = 10;              // list rows on screen, fewer with bigger text
 const HOLD_MS = 1200;      // hold Cross this long to delete
 const TAU = Math.PI * 2;
 
@@ -50,6 +50,7 @@ const ICON = {
   lock: '<svg viewBox="0 0 30 30"><path d="M9 13V9a6 6 0 0 1 12 0v4" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="3"/><rect x="4" y="13" width="22" height="15" rx="3" fill="rgba(255,255,255,.35)"/></svg>',
   box: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2.5"/></svg>',
   checked: '<svg viewBox="0 0 30 30"><rect width="30" height="30" rx="7" fill="#2fbf55"/><path d="M7 15.5l5.5 5.5L23.5 9" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  gear: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.2h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.2 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>',
   partial: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="#2fbf55" stroke-width="2.5"/><rect x="8" y="13" width="14" height="4" rx="2" fill="#2fbf55"/></svg>',
 };
 
@@ -72,6 +73,58 @@ const GLYPH = {
   l1: '<span class="glyph wide">L1</span>', r1: '<span class="glyph wide">R1</span>',
   l2: '<span class="glyph wide">L2</span>', r2: '<span class="glyph wide">R2</span>',
 };
+
+// ================================================================ settings
+
+// Kept in this browser's localStorage, so each device has its own.
+const SETTINGS = [
+  { key: 'textSize', label: 'Text size', values: [0.7, 0.85, 1, 1.15, 1.3], def: 1,
+    show: (v) => Math.round(v * 100) + '%' },
+  { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
+    show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
+];
+const SETTINGS_KEY = 'dsa.settings';
+const settings = {};
+
+function loadSettings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { /* no storage */ }
+  for (const d of SETTINGS) settings[d.key] = d.values.includes(saved[d.key]) ? saved[d.key] : d.def;
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* no storage */ }
+}
+
+const ROWS_H = 714, ROW_GAP = 6;
+function applySettings() {
+  const root = document.documentElement;
+  const fs = settings.textSize;
+  const rowH = Math.round(66 * fs);
+  root.style.setProperty('--fs', fs);
+  root.style.setProperty('--row', rowH + 'px');
+  VIS = Math.floor((ROWS_H + ROW_GAP) / (rowH + ROW_GAP));
+  root.dataset.theme = settings.theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = settings.theme === 'blue' ? '#081d36' : '#000000';
+  clampList('focus', 'scroll', S.node ? S.node.children.length : 0);
+  clampList('bfocus', 'bscroll', S.biggest.length);
+  clampList('rfocus', 'rscroll', S.marked.size);
+}
+
+// Step a setting through its values; applied (and saved) at once.
+function stepSetting(i, dir) {
+  const d = SETTINGS[i];
+  const k = d.values.indexOf(settings[d.key]) + dir;
+  if (k < 0 || k >= d.values.length) return;
+  settings[d.key] = d.values[k];
+  saveSettings();
+  applySettings();
+  render();
+}
+
+function openSettings() {
+  showDialog({ title: 'Settings', settings: true, buttons: ['Close'], cancel: 0, focus: 0 });
+}
 
 // ================================================================ state
 
@@ -319,13 +372,27 @@ function openMenu() {
     title: 'Menu',
     vertical: true,
     buttons: ['Rescan ' + (S.storage ? S.storage.name : ''), 'Clear selection', 'Choose another storage',
-              'Stop Disk Space Analyzer', 'Close'],
-    cancel: 4,
+              'Settings', 'Stop Disk Space Analyzer', 'Close'],
+    cancel: 5,
     onChoose: (i) => {
       if (i === 0 && S.storage) startScan(S.storage);
       if (i === 1) { S.marked.clear(); toast('Selection cleared'); render(); }
       if (i === 2) leaveScan();
-      if (i === 3) stopPayload();
+      if (i === 3) openSettings();
+      if (i === 4) stopPayload();
+    },
+  });
+}
+
+function openHomeMenu() {
+  showDialog({
+    title: 'Menu',
+    vertical: true,
+    buttons: ['Refresh storage list', 'Settings', 'Close'],
+    cancel: 2,
+    onChoose: (i) => {
+      if (i === 0) loadStorages().then(() => { render(); toast('Storage list refreshed'); });
+      if (i === 1) openSettings();
     },
   });
 }
@@ -396,8 +463,28 @@ function tickHold() {
   setTimeout(() => { if (S.dialog === d) closeDialog(d.hold); }, 150);  // show it full first
 }
 
+// Settings dialog focus: 0..SETTINGS.length-1 are rows, SETTINGS.length is Close.
+function settingsInput(a) {
+  const d = S.dialog;
+  const n = SETTINGS.length;
+  if (a === 'up' || a === 'down') {
+    d.focus = Math.max(0, Math.min(n, d.focus + (a === 'down' ? 1 : -1)));
+    render();
+  } else if ((a === 'left' || a === 'right') && d.focus < n) {
+    stepSetting(d.focus, a === 'right' ? 1 : -1);
+  } else if (a === 'confirm' && d.focus < n) {
+    // Cross cycles through the values, wrapping around.
+    const def = SETTINGS[d.focus];
+    const k = def.values.indexOf(settings[def.key]);
+    stepSetting(d.focus, k === def.values.length - 1 ? -k : 1);
+  } else if (a === 'back' || a === 'menu' || a === 'confirm') {
+    closeDialog(null);
+  }
+}
+
 function dialogInput(a) {
   const d = S.dialog;
+  if (d.settings) { settingsInput(a); return; }
   const n = d.buttons.length;
   const prev = d.vertical ? a === 'up' : a === 'left';
   const next = d.vertical ? a === 'down' : a === 'right';
@@ -443,7 +530,8 @@ function homeInput(a) {
   } else if (a === 'left' && S.hfocus % 2 === 1) S.hfocus--;
   else if (a === 'right' && S.hfocus % 2 === 0 && S.hfocus + 1 < n) S.hfocus++;
   else if (a === 'confirm' && S.storages[S.hfocus]) { startScan(S.storages[S.hfocus]); return; }
-  else if (a === 'menu') { loadStorages().then(() => { render(); toast('Storage list refreshed'); }); return; }
+  else if (a === 'menu') { openHomeMenu(); return; }
+  else if (a === 'review') { openSettings(); return; }
   render();
 }
 
@@ -547,13 +635,19 @@ function act(el) {
     case 'center': if (S.tab === 0) goUp(); break;
     case 'hint': input(el.dataset.a, 'click'); break;
     case 'delbtn': askDelete(); break;
-    case 'dlg': if (S.dialog && i !== S.dialog.hold) closeDialog(i); break;
+    case 'dlg':
+      if (S.dialog && S.dialog.settings) closeDialog(null);
+      else if (S.dialog && i !== S.dialog.hold) closeDialog(i);
+      break;
+    case 'set': if (S.dialog) { S.dialog.focus = i; settingsInput('confirm'); } break;
+    case 'setv': stepSetting(i, Number(el.dataset.d)); break;
     default: break;
   }
 }
 
 function hover(el) {
-  const k = el.dataset.act, i = Number(el.dataset.i);
+  const k = el.dataset.act;
+  let i = Number(el.dataset.i);
   let changed = false;
   if (k === 'storage' && S.hfocus !== i) { S.hfocus = i; changed = true; }
   if (k === 'row' || k === 'check') {
@@ -562,7 +656,10 @@ function hover(el) {
     else if (S.focus !== i) { S.focus = i; changed = true; }
   }
   if (k === 'delbtn' && !S.rbutton) { S.rbutton = true; changed = true; }
-  if (k === 'dlg' && S.dialog && S.dialog.focus !== i) { S.dialog.focus = i; stopHold(); changed = true; }
+  if (k === 'dlg' && S.dialog && S.dialog.settings) i = SETTINGS.length;
+  if ((k === 'dlg' || k === 'set' || k === 'setv') && S.dialog && S.dialog.focus !== i) {
+    S.dialog.focus = i; stopHold(); changed = true;
+  }
   if (k === 'seg') {
     const s = chart.segs[i];
     if (S.hover !== s) {
@@ -859,6 +956,7 @@ function header(title, sub, tabs) {
 function renderHome() {
   let h = `<div class="abs home-title">Disk Space Analyzer</div>
     <div class="abs home-sub">Choose a storage to scan. Find what takes space, select it, clean it up.</div>
+    <div class="abs home-settings" data-act="hint" data-a="review">${GLYPH.triangle}${ICON.gear}<span>Settings</span></div>
     <div class="abs cards">`;
   S.storages.forEach((s, i) => {
     const used = s.total ? 1 - s.free / s.total : 0;
@@ -867,13 +965,13 @@ function renderHome() {
       <div class="name ellipsis">${esc(s.name)}</div>
       <div class="path ellipsis">${esc(s.path)}</div>
       <div class="bar"><i class="${used > 0.9 ? 'full' : ''}" style="width:${(used * 100).toFixed(1)}%"></i></div>
-      <div class="info">${fmtSize(s.total - s.free)} used &middot; ${fmtSize(s.free)} free of ${fmtSize(s.total)}</div>
+      <div class="info ellipsis">${fmtSize(s.free)} free of ${fmtSize(s.total)} &middot; ${fmtSize(s.total - s.free)} used</div>
     </div>`;
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  return [h, hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('options', 'Refresh', 'menu') +
-             hint('lstick', 'Cursor')];
+  return [h, hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('triangle', 'Settings', 'review') +
+             hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor')];
 }
 
 function renderProgress(deleting) {
@@ -1036,6 +1134,7 @@ function renderDialog() {
   const box = $('#dialog');
   const d = S.dialog;
   if (!d) { box.innerHTML = ''; return; }
+  if (d.settings) { box.innerHTML = settingsHtml(d); return; }
   const one = d.buttons.length === 1;
   box.innerHTML = `<div class="dlg"><h2>${esc(d.title)}</h2>
     ${d.lines.map((l) => `<p>${glyphText(l)}</p>`).join('')}
@@ -1044,6 +1143,22 @@ function renderDialog() {
       ${d.buttons.map((b, i) => `<div class="btn${i === d.focus ? ' focus' : ''}${i === d.hold && d.danger ? ' danger' : ''}"
          data-act="dlg" data-i="${i}">${i === d.hold ? `<i class="fill"></i><span class="btn-ico">${GLYPH.cross}</span>` : ''}<span>${glyphText(b)}</span></div>`).join('')}
     </div></div>`;
+}
+
+function settingsHtml(d) {
+  const rows = SETTINGS.map((def, i) => {
+    const k = def.values.indexOf(settings[def.key]);
+    const arrow = (dir, ch, off) =>
+      `<div class="arr${off ? ' off' : ''}" data-act="setv" data-i="${i}" data-d="${dir}">${ch}</div>`;
+    return `<div class="set-row${d.focus === i ? ' focus' : ''}" data-act="set" data-i="${i}">
+      <div class="lbl">${esc(def.label)}</div>
+      ${arrow(-1, '&lsaquo;', k === 0)}<div class="val">${esc(def.show(settings[def.key]))}</div>${arrow(1, '&rsaquo;', k === def.values.length - 1)}
+    </div>`;
+  }).join('');
+  const close = d.focus === SETTINGS.length;
+  return `<div class="dlg"><h2>Settings</h2>${rows}
+    <p class="set-preview">Changes apply right away and are saved on this device.</p>
+    <div class="btns one"><div class="btn${close ? ' focus' : ''}" data-act="dlg" data-i="0"><span>Close</span></div></div></div>`;
 }
 
 // ================================================================ status bar
@@ -1071,6 +1186,8 @@ function fit() {
 window.addEventListener('resize', fit);
 
 async function start() {
+  loadSettings();
+  applySettings();
   fit();
   render();
   loadInfo();
