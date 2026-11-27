@@ -4,6 +4,7 @@
 #include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <cstdlib>
@@ -23,6 +24,101 @@ static bool IsDir(const std::string& p) {
   struct stat st;
   return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
+
+#if defined(__PROSPERO__)
+namespace {
+
+uint32_t Le16(const uint8_t* p) { return p[0] | p[1] << 8; }
+uint32_t Le32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+
+// Raw disk reads must be sector aligned; 4 KiB covers 512 and 4096 byte sectors.
+constexpr size_t kBlock = 4096;
+
+bool ReadAt(int fd, uint64_t off, uint8_t* buf) {
+  uint64_t base = off & ~(uint64_t)(kBlock - 1);
+  uint8_t tmp[kBlock * 2];
+  if (pread(fd, tmp, sizeof tmp, (off_t)base) != (ssize_t)sizeof tmp) return false;
+  memcpy(buf, tmp + (off - base), kBlock);
+  return true;
+}
+
+void AppendUtf8(std::string& out, uint32_t c) {
+  if (c < 0x80) out += (char)c;
+  else if (c < 0x800) { out += (char)(0xC0 | c >> 6); out += (char)(0x80 | (c & 0x3F)); }
+  else if (c < 0x10000) { out += (char)(0xE0 | c >> 12); out += (char)(0x80 | (c >> 6 & 0x3F)); out += (char)(0x80 | (c & 0x3F)); }
+  else { out += (char)(0xF0 | c >> 18); out += (char)(0x80 | (c >> 12 & 0x3F)); out += (char)(0x80 | (c >> 6 & 0x3F)); out += (char)(0x80 | (c & 0x3F)); }
+}
+
+std::string Trim(std::string s) {
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\0')) s.pop_back();
+  return s;
+}
+
+// exFAT: the label is a 0x83 entry in the root directory, UTF-16LE.
+std::string ExfatLabel(int fd, const uint8_t* boot) {
+  uint32_t sector = 1u << boot[108], cluster = sector << boot[109];
+  uint64_t heap = (uint64_t)Le32(boot + 88) * sector;
+  uint32_t root = Le32(boot + 96);
+  if (root < 2 || boot[108] < 9 || boot[108] > 12) return "";
+  uint8_t dir[kBlock];
+  if (!ReadAt(fd, heap + (uint64_t)(root - 2) * cluster, dir)) return "";
+  for (size_t i = 0; i + 32 <= sizeof dir; i += 32) {
+    const uint8_t* e = dir + i;
+    if (e[0] == 0x00) break;
+    if (e[0] != 0x83) continue;
+    std::string out;
+    for (int k = 0, n = e[1] > 11 ? 11 : e[1]; k < n; k++) {
+      uint32_t c = Le16(e + 2 + k * 2);
+      if (c >= 0xD800 && c < 0xDC00 && k + 1 < n) {
+        uint32_t lo = Le16(e + 4 + k * 2);
+        c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+        k++;
+      }
+      AppendUtf8(out, c);
+    }
+    return out;
+  }
+  return "";
+}
+
+// FAT32: the label is an entry with the volume ID attribute in the root
+// directory; the copy in the boot sector is the fallback.
+std::string Fat32Label(int fd, const uint8_t* boot) {
+  uint32_t sector = Le16(boot + 11), per_cluster = boot[13];
+  uint64_t data = (uint64_t)Le16(boot + 14) + (uint64_t)boot[16] * Le32(boot + 36);
+  uint32_t root = Le32(boot + 44);
+  uint8_t dir[kBlock];
+  if (sector >= 512 && per_cluster && root >= 2 &&
+      ReadAt(fd, (data + (uint64_t)(root - 2) * per_cluster) * sector, dir)) {
+    for (size_t i = 0; i + 32 <= sizeof dir; i += 32) {
+      const uint8_t* e = dir + i;
+      if (e[0] == 0x00) break;
+      if (e[0] == 0xE5 || (e[11] & 0x0F) == 0x0F || !(e[11] & 0x08)) continue;
+      return Trim(std::string((const char*)e, 11));
+    }
+  }
+  std::string s = Trim(std::string((const char*)boot + 71, 11));
+  return s == "NO NAME" ? "" : s;
+}
+
+}  // namespace
+
+// The name the drive shows on a computer, or "" when it has none or cannot be read.
+static std::string VolumeLabel(const std::string& mount) {
+  struct statfs sf;
+  if (statfs(mount.c_str(), &sf) != 0 || strncmp(sf.f_mntfromname, "/dev/", 5) != 0) return "";
+  int fd = open(sf.f_mntfromname, O_RDONLY);
+  if (fd < 0) return "";
+  uint8_t boot[kBlock];
+  std::string label;
+  if (ReadAt(fd, 0, boot) && Le16(boot + 510) == 0xAA55) {
+    if (memcmp(boot + 3, "EXFAT   ", 8) == 0) label = ExfatLabel(fd, boot);
+    else if (memcmp(boot + 82, "FAT32   ", 8) == 0) label = Fat32Label(fd, boot);
+  }
+  close(fd);
+  return label;
+}
+#endif
 
 std::vector<Storage> ListStorages(const std::vector<std::string>& extra) {
   std::vector<Storage> cand;
@@ -57,6 +153,10 @@ std::vector<Storage> ListStorages(const std::vector<std::string>& extra) {
     if (s.kind == "usb" || s.kind == "ext") {
       struct statfs sf;
       if (statfs(s.path.c_str(), &sf) != 0 || s.path != sf.f_mntonname) continue;
+    }
+    if (s.kind == "usb") {
+      std::string label = VolumeLabel(s.path);
+      if (!label.empty()) s.name = label;
     }
 #endif
     out.push_back(s);
