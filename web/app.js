@@ -1683,7 +1683,7 @@ function renderHome() {
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
   let hints = hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('square', 'Export report', 'mark') +
               hint('triangle', 'Settings', 'review') + hint('circle', 'Close') +
-              hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor');
+              hint('lstick', 'Cursor');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
       &middot; scan a storage, open a folder</div></div>`;
@@ -1919,8 +1919,8 @@ function renderBrowse() {
 
   let hints = S.tab !== 1
     ? hint('cross', 'Open', 'confirm') + hint('circle', 'Back', 'back') + hint('square', 'Select', 'mark') +
-      hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor')
-    : hint('cross', 'Show in folder', 'confirm') + hint('square', 'Select', 'mark') + hint('options', 'Menu', 'menu') +
+      hint('lstick', 'Cursor')
+    : hint('cross', 'Show in folder', 'confirm') + hint('square', 'Select', 'mark') +
       hint('lstick', 'Cursor');
   if (S.clip) {
     const n = S.clip.length;
