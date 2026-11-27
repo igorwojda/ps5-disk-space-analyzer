@@ -10,6 +10,8 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -273,19 +275,53 @@ const GamePart* FindGamePart(const std::string& path) {
   return nullptr;
 }
 
+// FindNode for many paths at once: each folder's children are put in a map by
+// name the first time a path goes through it, instead of searched one by one
+// for every path (a selection of a whole big folder).
+class NodeFinder {
+ public:
+  explicit NodeFinder(Node* root) : root_(root) {}
+  Node* Find(const std::string& path) {
+    if (!root_) return nullptr;
+    const std::string& rp = root_->name;
+    if (path == rp) return root_;
+    size_t pos;
+    if (rp == "/") pos = 1;
+    else if (path.size() > rp.size() && path.compare(0, rp.size(), rp) == 0 && path[rp.size()] == '/') pos = rp.size() + 1;
+    else return nullptr;
+    Node* n = root_;
+    while (n && pos < path.size()) {
+      size_t s = path.find('/', pos);
+      if (s == std::string::npos) s = path.size();
+      auto& kids = kids_[n];
+      if (kids.empty())
+        for (Node* c : n->children) kids.emplace(c->name, c);
+      auto it = kids.find(path.substr(pos, s - pos));
+      n = it == kids.end() ? nullptr : it->second;
+      pos = s + 1;
+    }
+    return n;
+  }
+
+ private:
+  Node* root_;
+  std::unordered_map<const Node*, std::unordered_map<std::string, Node*>> kids_;
+};
+
 // A cut item to paste, given by path: it may come from an earlier scan of
 // another storage. Only an existing, unprotected entry inside a listed storage
-// other than the system partition, never a volume mounted there.
-bool CutSourceOk(const std::string& path) {
+// (from `storages`, ListStorages) other than the system partition, never a
+// volume mounted there.
+bool CutSourceOk(const std::string& path, const std::vector<Storage>& storages, NodeFinder& finder) {
   if (path.size() < 2 || path[0] != '/' || path.back() == '/') return false;
   if (path.find("/../") != std::string::npos || path.find("/./") != std::string::npos) return false;
   if (path.size() >= 3 && (path.compare(path.size() - 3, 3, "/..") == 0 || path.compare(path.size() - 2, 2, "/.") == 0))
     return false;
   if (IsProtected(path)) return false;
   bool listed = false;
-  for (const Storage& st : ListStorages(g_extra))
+  for (const Storage& st : storages)
     if (st.kind != "system" && IsInside(path, st.path)) listed = true;
-  if (!listed && !ReadOnlyScanLocked() && FindNode(g.root, path)) listed = true;
+  if (!listed && !ReadOnlyScanLocked() && finder.Find(path)) listed = true;
   if (!listed) return false;
   size_t slash = path.find_last_of('/');
   std::string parent = slash == 0 ? "/" : path.substr(0, slash);
@@ -299,32 +335,44 @@ bool CutSourceOk(const std::string& path) {
 // cut in as sizes=1,2). Protected items are dropped, and so is anything inside
 // another selected folder.
 std::vector<PathTarget> SelectedLocked(const Request& req, bool cut = false) {
-  std::vector<std::string> paths;
-  std::vector<std::pair<std::string, uint64_t>> hints;  // cut path -> size
+  // Every pick with its node in the scanned tree and its size: the node's,
+  // else the game folder's, else the size the cut item had when it was cut.
+  std::vector<PathTarget> picks;
+  NodeFinder finder(g.root);
   auto it = req.query.find("ids");
   std::string ids = it == req.query.end() ? "" : it->second;
   size_t pos = 0;
-  while (pos < ids.size()) {
+  while (pos < ids.size() && !ReadOnlyScanLocked()) {
     size_t c = ids.find(',', pos);
     if (c == std::string::npos) c = ids.size();
     Node* n = g.index.Get((uint32_t)std::strtoul(ids.substr(pos, c - pos).c_str(), nullptr, 10));
     pos = c + 1;
-    if (ReadOnlyScanLocked()) break;
-    if (!n || !n->parent || n->isMount || IsProtected(n->path())) continue;  // never the root
-    paths.push_back(n->path());
+    if (!n || !n->parent || n->isMount) continue;  // never the root
+    std::string path = n->path();
+    if (!IsProtected(path)) picks.push_back({path, n, n->size});
   }
   it = req.query.find("paths");
   std::string plist = it == req.query.end() ? "" : it->second;
-  pos = 0;
-  while (pos < plist.size()) {
-    size_t c = plist.find('\n', pos);
-    if (c == std::string::npos) c = plist.size();
-    std::string path = plist.substr(pos, c - pos);
-    pos = c + 1;
-    // Only folders the game count found, never an arbitrary path.
-    if (FindGamePart(path) && !IsProtected(path)) paths.push_back(path);
+  std::unordered_map<std::string, const GamePart*> parts;  // game folders by path
+  if (!plist.empty() || cut)
+    for (const GameTotal& gt : g.games)
+      for (const GamePart& part : gt.parts) parts.emplace(part.path, &part);
+  if (!plist.empty()) {
+    pos = 0;
+    while (pos < plist.size()) {
+      size_t c = plist.find('\n', pos);
+      if (c == std::string::npos) c = plist.size();
+      std::string path = plist.substr(pos, c - pos);
+      pos = c + 1;
+      // Only folders the game count found, never an arbitrary path.
+      auto part = parts.find(path);
+      if (part == parts.end() || IsProtected(path)) continue;
+      Node* n = finder.Find(path);
+      picks.push_back({path, n, n ? n->size : part->second->size});
+    }
   }
   if (cut) {
+    std::vector<Storage> storages = ListStorages(g_extra);
     it = req.query.find("srcs");
     std::string slist = it == req.query.end() ? "" : it->second;
     it = req.query.find("sizes");
@@ -340,27 +388,25 @@ std::vector<PathTarget> SelectedLocked(const Request& req, bool cut = false) {
       if (sc == std::string::npos) sc = sizes.size();
       uint64_t size = spos < sizes.size() ? std::strtoull(sizes.substr(spos, sc - spos).c_str(), nullptr, 10) : 0;
       spos = sc + 1;
-      if (!CutSourceOk(path)) continue;
-      paths.push_back(path);
-      hints.push_back({path, size});
+      if (!CutSourceOk(path, storages, finder)) continue;
+      Node* n = finder.Find(path);
+      auto part = n ? parts.end() : parts.find(path);
+      picks.push_back({path, n, n ? n->size : part != parts.end() ? part->second->size : size});
     }
   }
+  // Each path once, and nothing inside another selected folder: look its
+  // parent folders up instead of comparing it with every other pick.
+  std::unordered_set<std::string> chosen;
+  for (const PathTarget& t : picks) chosen.insert(t.path);
+  auto inside_chosen = [&](const std::string& path) {
+    for (size_t s = path.find_last_of('/'); s != std::string::npos && s > 0; s = path.find_last_of('/', s - 1))
+      if (chosen.count(path.substr(0, s))) return true;
+    return path.size() > 1 && path[0] == '/' && chosen.count("/");
+  };
   std::vector<PathTarget> top;
-  for (const std::string& path : paths) {
-    bool covered = false;
-    for (const std::string& q : paths)
-      if (q != path && IsInside(path, q)) covered = true;
-    bool dup = false;
-    for (const auto& t : top) dup = dup || t.path == path;
-    if (covered || dup) continue;
-    PathTarget t{path, FindNode(g.root, path)};
-    if (t.node) t.size = t.node->size;
-    else if (const GamePart* part = FindGamePart(path)) t.size = part->size;
-    else
-      for (const auto& h : hints)
-        if (h.first == path) t.size = h.second;
-    top.push_back(t);
-  }
+  std::unordered_set<std::string> seen;
+  for (PathTarget& t : picks)
+    if (seen.insert(t.path).second && !inside_chosen(t.path)) top.push_back(std::move(t));
   return top;
 }
 
