@@ -1764,9 +1764,8 @@ function renderHome() {
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  let hints = hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('square', 'Export report', 'mark') +
-              hint('triangle', 'Settings', 'review') + hint('circle', 'Close') +
-              hint('lstick', 'Cursor');
+  let hints = hint('cross', 'Scan', 'confirm') + hint('square', 'Export report', 'mark') +
+              hint('triangle', 'Settings', 'review') + hint('circle', 'Close');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
       &middot; scan a storage, open a folder</div></div>`;
