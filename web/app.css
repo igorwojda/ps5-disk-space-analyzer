@@ -81,10 +81,11 @@ svg { display: block; }
 }
 .row.focus { background: var(--focus-bg); }
 .row .chk { width: 30px; height: 30px; margin: 0 20px; flex: none; }
-.row .ico { width: 40px; height: 40px; margin-right: 16px; flex: none; }
-.row .ico img { display: block; width: 40px; height: 40px; border-radius: 6px; object-fit: cover; }
-.row .game { font-size: calc(20px * var(--fs)); line-height: 1.15; color: var(--dim); }
-.row.game-row .name { line-height: 1.15; }
+.row .ico { width: 56px; height: 56px; margin-right: 14px; flex: none; display: flex; align-items: center; justify-content: center; }
+.row .ico svg { width: 40px; height: 40px; }
+.row .ico img { display: block; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; }
+.row .game { font-size: calc(24px * var(--fs)); line-height: 1.05; color: var(--dim); }
+.row.game-row .name { line-height: 1.05; }
 .row.game-row .rbar { margin-top: 4px; }
 .row.focus .game { color: var(--text); }
 /* Games tab: taller rows with two lines of details. */
@@ -118,11 +119,11 @@ svg { display: block; }
 .row .name { font-size: calc(28px * var(--fs)); }
 .row .rbar { margin-top: 8px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .09); }
 .row .rbar > i { display: block; height: 100%; border-radius: 3px; min-width: 6px; }
-.row .folder { font-size: calc(20px * var(--fs)); color: var(--dim); margin-top: 2px; }
+.row .folder { font-size: calc(24px * var(--fs)); color: var(--dim); margin-top: 2px; }
 .row .right { width: calc(190px * var(--fs)); padding-right: 24px; text-align: right; flex: none; }
 .row .size { font-size: calc(28px * var(--fs)); font-weight: 700; color: var(--size); }
 .row .size.big { color: var(--big); }
-.row .sub { font-size: calc(20px * var(--fs)); color: var(--dim); }
+.row .sub { font-size: calc(24px * var(--fs)); color: var(--dim); }
 .row.focus .size, .row.focus .sub, .row.focus .folder { color: var(--text); }
 .empty { left: 40px; top: 520px; width: 1000px; text-align: center; font-size: calc(30px * var(--fs)); color: var(--dim); }
 .scroll { left: 1018px; top: 214px; width: 6px; height: 714px; border-radius: 3px; background: rgba(255, 255, 255, .07); }
