@@ -26,7 +26,6 @@ std::vector<Storage> ListStorages(const std::vector<std::string>& extra) {
   std::vector<Storage> cand;
 #if defined(__PROSPERO__)
   cand.push_back({"Internal storage", "/user", "internal"});
-  cand.push_back({"Homebrew data", "/data", "folder"});
   cand.push_back({"M.2 SSD", "/mnt/ext0", "ext"});
   cand.push_back({"Extended storage", "/mnt/ext1", "ext"});
   for (int i = 0; i < 8; i++) {

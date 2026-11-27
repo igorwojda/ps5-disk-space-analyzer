@@ -23,7 +23,16 @@
 
 #include <cstdint>
 
-#define PROCESS_NAME "disk-analyzer.elf"
+#define PROCESS_NAME "storage-analyzer.elf"
+// Names of earlier builds, stopped as well when this one starts.
+static const char* const kOldNames[] = {"disk-analyzer.elf"};
+
+// The kernel keeps a short thread name, so a long name comes back cut off.
+static bool SameName(const char* name, const char* tdname) {
+  size_t n = strnlen(tdname, 32);
+  if (n == std::strlen(name)) return std::strncmp(name, tdname, n) == 0;
+  return n >= 16 && n < std::strlen(name) && std::strncmp(name, tdname, n) == 0;
+}
 
 // pid of another process with our name (an older copy still running).
 static pid_t FindOther(const char* name) {
@@ -40,7 +49,7 @@ static pid_t FindOther(const char* name) {
       const char* tdname = (const char*)&p[447];
       if (structsize <= 0) break;
       p += structsize;
-      if (!std::strcmp(name, tdname) && pid != me) found = pid;
+      if (SameName(name, tdname) && pid != me) found = pid;
     }
   }
   std::free(buf);
@@ -79,6 +88,8 @@ int main(int argc, char* argv[]) {
   syscall(SYS_thr_set_name, -1, PROCESS_NAME);
   for (int tries = 0; tries < 10; tries++) {
     pid_t old = FindOther(PROCESS_NAME);
+    for (const char* name : kOldNames)
+      if (old <= 0) old = FindOther(name);
     if (old <= 0) break;
     Log("stopping older instance %d", (int)old);
     kill(old, SIGKILL);

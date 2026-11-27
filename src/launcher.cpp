@@ -21,8 +21,9 @@
 
 #include "web_assets.h"
 
-#define TITLE_ID "DSAN00001"
-#define OLD_TITLE_ID "DSKA00001"  // tile of an earlier build, removed if present
+#define TITLE_ID "SSAN00001"
+// Tiles of earlier builds, removed if present.
+static const char* const kOldTitleIds[] = {"DSKA00001", "DSAN00001"};
 
 extern "C" {
 int sceAppInstUtilInitialize(void);
@@ -93,7 +94,13 @@ int InstallLauncher(unsigned short port) {
     Log("sceAppInstUtilInitialize: 0x%08X", err);
     return -1;
   }
-  if (stat("/user/app/" OLD_TITLE_ID, &st) == 0) sceAppInstUtilAppUnInstall(OLD_TITLE_ID);
+  for (const char* old : kOldTitleIds) {
+    std::string old_dir = std::string("/user/app/") + old;
+    if (stat(old_dir.c_str(), &st) == 0) {
+      Log("launcher: removing old tile %s", old);
+      sceAppInstUtilAppUnInstall(old);
+    }
+  }
 
   if ((mkdir("/user/app", 0700) && errno != EEXIST) || (mkdir(dir, 0755) && errno != EEXIST) ||
       (mkdir(sce_sys, 0755) && errno != EEXIST)) {

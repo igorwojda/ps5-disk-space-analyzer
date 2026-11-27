@@ -336,13 +336,15 @@ void ApiHandle(const Request& req, Response& res) {
       Error(res, 400, "missing path");
       return;
     }
+    // Only a listed storage can be scanned, never an arbitrary folder.
     Storage s;
-    s.path = it->second;
-    s.name = s.path;
-    s.kind = "folder";
+    bool found = false;
     for (auto& st : ListStorages(g_extra))
-      if (st.path == s.path) s = st;
-    QuerySpace(s.path, &s.total, &s.free);
+      if (st.path == it->second) s = st, found = true;
+    if (!found) {
+      Error(res, 400, "not a storage");
+      return;
+    }
     g.storage = s;
     g.scanner = std::make_unique<Scanner>();
     g.scanner->Start(s.path, SkipList());

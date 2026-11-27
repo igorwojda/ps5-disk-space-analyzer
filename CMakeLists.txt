@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(disk-analyzer VERSION 1.0.0 LANGUAGES C CXX)
+project(storage-analyzer VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,7 +62,7 @@ file(APPEND ${GEN}/web_assets_table.cpp.in
 configure_file(${GEN}/web_assets_table.cpp.in ${GEN}/web_assets_table.cpp COPYONLY)
 
 # ---- the payload
-add_executable(disk-analyzer
+add_executable(storage-analyzer
   src/main.cpp
   src/api.cpp
   src/http.cpp
@@ -73,16 +73,16 @@ add_executable(disk-analyzer
   ${GEN}/web_assets_table.cpp
   ${ASSET_SOURCES}
 )
-target_include_directories(disk-analyzer PRIVATE src)
-target_compile_definitions(disk-analyzer PRIVATE APP_VERSION="${PROJECT_VERSION}")
-target_compile_options(disk-analyzer PRIVATE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(disk-analyzer PRIVATE Threads::Threads)
+target_include_directories(storage-analyzer PRIVATE src)
+target_compile_definitions(storage-analyzer PRIVATE APP_VERSION="${PROJECT_VERSION}")
+target_compile_options(storage-analyzer PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_link_libraries(storage-analyzer PRIVATE Threads::Threads)
 
 if(PS5)
-  set_target_properties(disk-analyzer PROPERTIES SUFFIX ".elf")
+  set_target_properties(storage-analyzer PROPERTIES SUFFIX ".elf")
   # libSceAppInstUtil needs libSceIpmi loaded first: linked alone (or loaded
   # with sceKernelLoadStartModule) the payload hangs before main() and never
   # logs anything. Same set and order as ps5-web-file-manager.
-  target_link_libraries(disk-analyzer PRIVATE
+  target_link_libraries(storage-analyzer PRIVATE
     SceIpmi SceAppInstUtil SceUserService SceSystemService kernel_sys)
 endif()

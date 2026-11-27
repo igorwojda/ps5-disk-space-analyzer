@@ -313,7 +313,7 @@ function openMenu() {
     title: 'Menu',
     vertical: true,
     buttons: ['Rescan ' + (S.storage ? S.storage.name : ''), 'Clear selection', 'Choose another storage',
-              'Stop Disk Analyzer', 'Close'],
+              'Stop Storage Space Analyzer', 'Close'],
     cancel: 4,
     onChoose: (i) => {
       if (i === 0 && S.storage) startScan(S.storage);
@@ -337,8 +337,8 @@ function leaveScan() {
 
 function stopPayload() {
   showDialog({
-    title: 'Stop Disk Analyzer?',
-    lines: ['The background payload stops. Send disk-analyzer.elf again to use the app.'],
+    title: 'Stop Storage Space Analyzer?',
+    lines: ['The background payload stops. Send storage-analyzer.elf again to use the app.'],
     buttons: ['Cancel', 'Stop'], cancel: 0,
     onChoose: (i) => {
       if (i !== 1) return;
