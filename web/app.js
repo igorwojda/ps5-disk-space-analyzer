@@ -1046,8 +1046,9 @@ async function loadInfo() {
   const host = info.ip || (local ? '' : location.hostname);
   const port = info.port || location.port;
   const url = host ? `http://${host}:${port}/` : `http://&lt;PS5 IP&gt;:${port}/`;
-  $('#statusbar').innerHTML = `<span><b>v${esc(info.version)}</b></span>
-    <span>Open in browser: <b>${host ? esc(url) : url}</b></span>`;
+  // The PS5 tile opens 127.0.0.1; any other device already is "in a browser".
+  $('#statusbar').innerHTML = `<span><b>v${esc(info.version)}</b></span>` +
+    (local ? `<span>Open in browser: <b>${host ? esc(url) : url}</b></span>` : '');
 }
 
 // ================================================================ layout + start
