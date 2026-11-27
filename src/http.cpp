@@ -121,6 +121,7 @@ static const char* Reason(int s) {
     case 404: return "Not Found";
     case 409: return "Conflict";
     case 413: return "Payload Too Large";
+    case 500: return "Internal Server Error";
     default: return "Error";
   }
 }
@@ -189,15 +190,15 @@ static void* Connection(void* arg) {
   const void* data = res.data ? res.data : res.body.data();
   size_t size = res.data ? res.size : res.body.size();
   char header[512];
-  int hn = std::snprintf(header, sizeof header,
-                         "HTTP/1.1 %d %s\r\n"
-                         "Content-Type: %s\r\n"
-                         "Content-Length: %zu\r\n"
-                         "Cache-Control: %s\r\n"
-                         "Access-Control-Allow-Origin: *\r\n"
-                         "Connection: close\r\n\r\n",
-                         res.status, Reason(res.status), res.type.c_str(), size, res.cache.c_str());
-  if (SendAll(fd, header, (size_t)hn) && req.method != "HEAD") SendAll(fd, data, size);
+  std::snprintf(header, sizeof header,
+                "HTTP/1.1 %d %s\r\n"
+                "Content-Type: %s\r\n"
+                "Content-Length: %zu\r\n"
+                "Cache-Control: %s\r\n"
+                "Access-Control-Allow-Origin: *\r\n",
+                res.status, Reason(res.status), res.type.c_str(), size, res.cache.c_str());
+  std::string head_out = header + res.headers + "Connection: close\r\n\r\n";
+  if (SendAll(fd, head_out.data(), head_out.size()) && req.method != "HEAD") SendAll(fd, data, size);
   shutdown(fd, SHUT_WR);
   close(fd);
   return nullptr;

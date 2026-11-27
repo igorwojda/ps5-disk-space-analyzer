@@ -21,6 +21,9 @@ up space, so you can choose what to remove.
 - 🧹 **Clean up safely:** select what you don't need and see how much space you'll
   get back before you delete. System files are locked, so you can't remove
   anything the console needs.
+- 📄 **Export a report:** pick one drive or all of them and save one HTML file
+  with every folder and file and the space each takes, to keep or share. It
+  opens in any browser.
 - 📱 **Use your phone or PC:** the same app opens in any browser on your home
   network.
 

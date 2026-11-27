@@ -1,7 +1,9 @@
 // Disk Space Analyzer web UI.
 //
 // Screens: home (pick storage) -> scanning -> browse (select) -> review -> deleting
-// or moving. Cut (review screen or menu) keeps the items; Triangle (or the menu)
+// or moving. Square on home (or the menu) exports a report: pick one drive or
+// all of them, the console scans them (reporting screen), and the HTML file
+// with every folder and file is downloaded or saved on a drive. Cut (review screen or menu) keeps the items; Triangle (or the menu)
 // pastes them into the open folder. Move to sends them to another storage.
 // Browse has three tabs: Folders, Biggest Files, Games (each game's folders on
 // every volume, added up).
@@ -59,6 +61,7 @@ const ICON = {
   box: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2.5"/></svg>',
   checked: '<svg viewBox="0 0 30 30"><rect width="30" height="30" rx="7" fill="#2fbf55"/><path d="M7 15.5l5.5 5.5L23.5 9" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   gear: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.2h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.2 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>',
+  report: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 18h2v-5H9zm3.5 0h2v-8h-2zm3.5 0h2v-3h-2z" fill-rule="evenodd"/></svg>',
   partial: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="#2fbf55" stroke-width="2.5"/><rect x="8" y="13" width="14" height="4" rx="2" fill="#2fbf55"/></svg>',
 };
 
@@ -163,6 +166,7 @@ const S = {
   cursor: false,      // the pointer (left stick / mouse) is in use
   hover: null,        // chart segment under the pointer
   scan: null,         // progress while scanning / deleting
+  reportBack: 'home', // screen to return to once the report is made
   resultSeq: 0,
 };
 
@@ -681,8 +685,123 @@ async function reloadAfterChange(st) {
   if (S.gnode) openGameNode(S.gnode.id);
 }
 
+// ---------------------------------------------------------------- report
+
+// The PS5 browser cannot download files: it saves the report on a drive.
+const ON_PS5 = /PlayStation/i.test(navigator.userAgent);
+
+// Choose what the report covers: one drive or all of them. `path`: the drive
+// focused first. The one scanned already goes in without a new scan.
+async function openExport(path) {
+  await loadStorages();
+  if (!S.storages.length) { toast('No storage found'); return; }
+  let ready = null;
+  try {
+    const st = await api('/api/status');
+    if (st.phase === 'ready' && st.storage) ready = st.storage.path;
+  } catch (e) { /* every drive is scanned then */ }
+  const all = S.storages.filter((s) => s.kind !== 'system');
+  const items = [];
+  if (all.length > 1) items.push([`All drives (${all.map((s) => s.name).join(', ')})`, 'all=1']);
+  for (const s of S.storages)
+    items.push([`${s.name} · ${fmtSize(s.total - s.free)} used${s.path === ready ? ' · scanned' : ''}`,
+                'paths=' + encodeURIComponent(s.path)]);
+  const focus = Math.max(0, items.findIndex((x) => x[1] === 'paths=' + encodeURIComponent(path)));
+  items.push(['Cancel', null]);
+  showDialog({
+    title: 'Export report',
+    lines: ['Choose what the report covers. The drives are scanned first; a full drive takes a few minutes.'],
+    vertical: true,
+    buttons: items.map((x) => x[0]),
+    cancel: items.length - 1, focus,
+    onChoose: (i) => { if (items[i][1]) startReport(items[i][1]); },
+  });
+}
+
+async function startReport(body) {
+  let st;
+  try { st = await api('/api/report/start', 'POST', body); } catch (e) {
+    toast(e.status === 409 ? 'Busy: wait for the scan, cleanup or move to finish' : 'Could not start the report: ' + e.message);
+    return;
+  }
+  S.reportBack = S.screen === 'browse' || S.screen === 'review' ? S.screen : 'home';
+  S.screen = 'reporting';
+  S.scan = st;
+  render();
+  pollReport();
+}
+
+async function pollReport() {
+  let st;
+  try { st = await api('/api/report/status'); } catch (e) { setTimeout(pollReport, 1000); return; }
+  if (S.screen !== 'reporting') return;
+  if (st.state === 'scanning' || st.state === 'games') {
+    S.scan = st;
+    render();
+    setTimeout(pollReport, 400);
+    return;
+  }
+  S.screen = S.reportBack;
+  if (S.screen === 'home') await loadStorages();
+  render();
+  if (st.state === 'ready') showExport(st);
+}
+
+function cancelReport() {
+  api('/api/report/cancel', 'POST').catch(() => {});
+  S.screen = S.reportBack;
+  render();
+  toast('Report cancelled');
+}
+
+// Where the finished report goes.
+async function showExport(st) {
+  let targets = [];
+  try { targets = await api('/api/report/targets'); } catch (e) { /* download only */ }
+  const what = st.drives.length > 1 ? `${st.drives.length} drives (${st.drives.join(', ')})` : st.drives[0];
+  const items = [];
+  if (!ON_PS5) items.push(['Download to this device', downloadReport]);
+  for (const t of targets) items.push([`Save to ${t.name}`, () => saveReport(t)]);
+  if (!items.length) { toast('Plug in a USB drive to save the report'); return; }
+  items.push(['Close', null]);
+  showDialog({
+    title: 'Report ready',
+    lines: [`One HTML file (${fmtSize(st.size)}) with every folder and file on ${what} and the space each one takes.`,
+            'It opens in any web browser, so you can keep it or send it to someone.'],
+    vertical: true,
+    buttons: items.map((x) => x[0]),
+    cancel: items.length - 1,
+    onChoose: (i) => { if (items[i][1]) items[i][1](); },
+  });
+}
+
+function downloadReport() {
+  // An attachment: the browser saves it and this page stays.
+  window.location.href = '/api/report?download=1';
+  toast('Preparing the report…');
+}
+
+async function saveReport(t) {
+  toast(`Saving the report to ${t.name}…`);
+  let r;
+  try { r = await api('/api/report/save', 'POST', 'dest=' + encodeURIComponent(t.path)); } catch (e) {
+    toast('Could not save the report: ' + e.message);
+    return;
+  }
+  $('#toast').classList.remove('show');
+  showDialog({
+    title: 'Report saved',
+    lines: [`${r.path} (${fmtSize(r.size)})`,
+            t.kind === 'usb' ? 'Plug the USB drive into a computer to open the file or share it.'
+                             : 'Copy it to a computer (for example over FTP) to open it or share it.'],
+    buttons: ['OK'],
+  });
+  if (S.screen === 'home') loadStorages().then(render);
+}
+
 function openMenu() {
-  const items = [['Rescan ' + (S.storage ? S.storage.name : ''), () => S.storage && startScan(S.storage)]];
+  const items = [['Rescan ' + (S.storage ? S.storage.name : ''), () => S.storage && startScan(S.storage)],
+                 ['Export report', () => openExport(S.storage ? S.storage.path : '')]];
   if (S.clip) {
     const n = fmtCount(S.clip.length);
     const move = S.clipMode === 'move';
@@ -706,6 +825,8 @@ function openMenu() {
 
 function openHomeMenu() {
   const items = [['Refresh storage list', () => loadStorages().then(() => { render(); toast('Storage list refreshed'); })]];
+  const f = S.storages[S.hfocus];
+  items.push(['Export report', () => openExport(f ? f.path : '')]);
   if (S.clip) items.push([`Cancel ${S.clipMode === 'move' ? 'move' : 'cut'} (${fmtCount(S.clip.length)} items)`, cancelCut]);
   items.push(['Settings', openSettings], ['Close', null]);
   showDialog({
@@ -837,6 +958,7 @@ function input(a, src) {
   switch (S.screen) {
     case 'home': homeInput(a); break;
     case 'scanning': if (a === 'back') cancelScan(); break;
+    case 'reporting': if (a === 'back') cancelReport(); break;
     case 'browse': browseInput(a); break;
     case 'review': reviewInput(a); break;
     default: break;
@@ -854,6 +976,7 @@ function homeInput(a) {
   else if (a === 'confirm' && S.storages[S.hfocus]) { startScan(S.storages[S.hfocus]); return; }
   else if (a === 'menu') { openHomeMenu(); return; }
   else if (a === 'review') { openSettings(); return; }
+  else if (a === 'mark') { openExport(S.storages[S.hfocus] ? S.storages[S.hfocus].path : ''); return; }
   render();
 }
 
@@ -1326,6 +1449,7 @@ function render() {
     case 'scanning': [html, hints] = renderProgress('scan'); break;
     case 'deleting': [html, hints] = renderProgress('delete'); break;
     case 'moving': [html, hints] = renderProgress('move'); break;
+    case 'reporting': [html, hints] = renderProgress('report'); break;
     case 'browse': [html, hints] = renderBrowse(); break;
     case 'review': [html, hints] = renderReview(); break;
     default: break;
@@ -1371,7 +1495,10 @@ function header(title, sub, tabs) {
 function renderHome() {
   let h = `<div class="abs home-title">Disk Space Analyzer</div>
     <div class="abs home-sub">Choose a storage to scan. Find what takes space, select it, clean it up.</div>
-    <div class="abs home-settings" data-act="hint" data-a="review">${GLYPH.triangle}${ICON.gear}<span>Settings</span></div>
+    <div class="abs home-actions">
+      <div class="home-btn" data-act="hint" data-a="mark">${GLYPH.square}${ICON.report}<span>Export report</span></div>
+      <div class="home-btn" data-act="hint" data-a="review">${GLYPH.triangle}${ICON.gear}<span>Settings</span></div>
+    </div>
     <div class="abs cards">`;
   S.storages.forEach((s, i) => {
     const used = s.total ? 1 - s.free / s.total : 0;
@@ -1385,7 +1512,8 @@ function renderHome() {
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  let hints = hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('triangle', 'Settings', 'review') +
+  let hints = hint('dpad', 'Move') + hint('cross', 'Scan', 'confirm') + hint('square', 'Export report', 'mark') +
+              hint('triangle', 'Settings', 'review') +
               hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
@@ -1406,6 +1534,22 @@ function renderProgress(op) {
       <div class="abs progress"><i class="move" style="width:${(frac * 100).toFixed(1)}%"></i></div>
       <div class="abs path-label ellipsis">${esc(p.current || '')}</div>`;
     return [h, '<div class="muted">Please wait, do not turn off the console or unplug the drive.</div>'];
+  }
+  if (op === 'report') {
+    const many = p.total > 1;
+    const step = many ? `Drive ${Math.min(p.index || 1, p.total)} of ${p.total} · ` : '';
+    if (p.state === 'games') {
+      h = `<div class="abs spinner"></div>
+        <div class="abs big-label">Counting game data&hellip;</div>
+        <div class="abs mid-label">Almost done: then the report is ready</div>`;
+    } else {
+      h = `<div class="abs spinner"></div>
+        <div class="abs spin-label">${fmtSize(p.bytes || 0)}</div>
+        <div class="abs big-label">Making a report: scanning ${esc(p.name || '')}</div>
+        <div class="abs mid-label">${step}${fmtCount(p.items || 0)} items found</div>
+        <div class="abs path-label ellipsis">${esc(p.current || '')}</div>`;
+    }
+    return [h, hint('circle', 'Cancel', 'back')];
   }
   if (op === 'scan') {
     h = `<div class="abs spinner"></div>
@@ -1783,6 +1927,16 @@ async function start() {
   let st = null;
   try { st = await api('/api/status'); } catch (e) { /* server just started */ }
   await loadStorages();
+  let rep = null;
+  try { rep = await api('/api/report/status'); } catch (e) { /* none */ }
+  if (rep && (rep.state === 'scanning' || rep.state === 'games')) {
+    S.reportBack = 'home';
+    S.screen = 'reporting';
+    S.scan = rep;
+    render();
+    pollReport();
+    return;
+  }
   // Reopening the tile resumes where you were.
   if (st && st.phase === 'scanning') {
     S.storage = st.storage;

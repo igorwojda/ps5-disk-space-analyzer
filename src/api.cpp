@@ -10,9 +10,11 @@
 #include <sstream>
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "games.h"
 #include "platform.h"
+#include "report.h"
 #include "system.h"
 #include "tree.h"
 #include "web_assets.h"
@@ -41,10 +43,22 @@ struct State {
   std::string result_op = "delete";
   uint64_t result_freed = 0, result_errors = 0, result_removed = 0, result_total = 0;
   std::string error;  // last scan error
+  time_t scanned = 0;  // when the scan finished
   // Games tab: every game's folders on every volume, counted on their own thread.
   std::unique_ptr<GameScanner> game_scanner;
   std::vector<GameTotal> games;
   bool games_ready = false;
+  // Report export: scans the chosen drives one by one, then builds the page.
+  struct ReportJob {
+    std::vector<Storage> scope;       // the drives, in report order
+    std::vector<std::string> drives;  // each drive's part once scanned
+    std::vector<size_t> todo;         // drives still to scan
+    size_t current = 0;               // the drive being scanned
+    std::unique_ptr<Scanner> scanner;
+    std::string title;                // "All drives", "Internal storage"
+    std::string html, name;           // the page and its file name, when done
+  };
+  std::unique_ptr<ReportJob> report;
 };
 
 State g;
@@ -396,6 +410,7 @@ void FinishScanLocked() {
   g.index.Add(r);
   g.biggest = BiggestFiles(r, 500);
   g.phase = Phase::Ready;
+  g.scanned = time(nullptr);
   QuerySpace(g.storage.path, &g.storage.total, &g.storage.free);
   Log("scan done: %llu items, %llu bytes", (unsigned long long)items, (unsigned long long)r->size);
 }
@@ -488,6 +503,8 @@ void FinishMoveLocked() {
       (unsigned long long)g.result_errors);
 }
 
+void PollReportLocked();
+
 void PollLocked() {
   if (g.phase == Phase::Scanning && g.scanner && g.scanner->Done()) FinishScanLocked();
   if (g.phase == Phase::Deleting && g.deleter && g.deleter->Done()) FinishDeleteLocked();
@@ -498,6 +515,7 @@ void PollLocked() {
     g.games_ready = true;
     Log("games counted: %zu", g.games.size());
   }
+  PollReportLocked();
 }
 
 const char* PhaseName(Phase p) {
@@ -544,6 +562,75 @@ void Static(const Request& req, Response& res) {
   }
   res.data = a->data;
   res.size = a->size;
+}
+
+// A web file's text: from the web folder in development, else built in.
+std::string AssetText(const std::string& p) {
+  if (!g_web_dir.empty()) {
+    std::ifstream f(g_web_dir + p, std::ios::binary);
+    if (f) {
+      std::ostringstream ss;
+      ss << f.rdbuf();
+      return ss.str();
+    }
+  }
+  const Asset* a = FindAsset(p.c_str());
+  return a ? std::string((const char*)a->data, a->size) : std::string();
+}
+
+bool ReportBusy() { return g.report && g.report->html.empty(); }
+
+// Next step of the report: take a finished drive, start the next one, and
+// build the page once every drive is in and the games are counted.
+void PollReportLocked() {
+  auto* j = g.report.get();
+  if (!j || !j->html.empty()) return;
+  if (j->scanner && j->scanner->Done()) {
+    Node* r = j->scanner->TakeRoot();
+    j->scanner.reset();
+    Storage st = j->scope[j->current];
+    QuerySpace(st.path, &st.total, &st.free);
+    if (r) j->drives[j->current] = ReportDriveJson({r, st, time(nullptr)});
+    delete r;
+  }
+  if (!j->scanner && !j->todo.empty()) {
+    j->current = j->todo.front();
+    j->todo.erase(j->todo.begin());
+    j->scanner = std::make_unique<Scanner>();
+    j->scanner->Start(j->scope[j->current].path, SkipList());
+    Log("report scan: %s", j->scope[j->current].path.c_str());
+  }
+  if (!j->scanner && j->todo.empty() && !g.game_scanner) {
+    j->html = ReportHtml(AssetText("/report.html"), j->title, j->drives, j->scope, g.games, g.games_ready);
+    j->name = ReportFileName(j->title, time(nullptr));
+    Log("report ready: %zu drives, %zu bytes", j->scope.size(), j->html.size());
+  }
+}
+
+std::string ReportStatusJson() {
+  auto* j = g.report.get();
+  if (!j) return "{\"state\":\"idle\"}";
+  std::ostringstream o;
+  const char* state = !j->html.empty() ? "ready" : j->scanner ? "scanning" : "games";
+  o << "{\"state\":\"" << state << "\",\"total\":" << j->scope.size()
+    << ",\"index\":" << (j->scope.size() - j->todo.size()) << ",\"drives\":[";
+  for (size_t i = 0; i < j->scope.size(); i++) o << (i ? "," : "") << Str(j->scope[i].name);
+  o << "]";
+  if (j->scanner)
+    o << ",\"name\":" << Str(j->scope[j->current].name) << ",\"items\":" << j->scanner->Items()
+      << ",\"bytes\":" << j->scanner->Bytes() << ",\"current\":" << Str(j->scanner->CurrentPath());
+  if (!j->html.empty()) o << ",\"size\":" << j->html.size() << ",\"file\":" << Str(j->name);
+  o << "}";
+  return o.str();
+}
+
+std::string TargetsJson() {
+  std::string o = "[";
+  auto list = ReportTargets(g_extra);
+  for (size_t i = 0; i < list.size(); i++)
+    o += (i ? "," : "") + std::string("{\"name\":") + Str(list[i].name) + ",\"path\":" + Str(list[i].path) +
+         ",\"kind\":" + Str(list[i].kind) + "}";
+  return o + "]";
 }
 
 }  // namespace
@@ -616,7 +703,7 @@ void ApiHandle(const Request& req, Response& res) {
       << ",\"total\":" << g.result_total << "}}";
     Json(res, 200, o.str());
   } else if (p == "/api/scan" && req.method == "POST") {
-    if (g.phase == Phase::Scanning || g.phase == Phase::Deleting || g.phase == Phase::Moving) {
+    if (g.phase == Phase::Scanning || g.phase == Phase::Deleting || g.phase == Phase::Moving || ReportBusy()) {
       Error(res, 409, "busy");
       return;
     }
@@ -732,6 +819,103 @@ void ApiHandle(const Request& req, Response& res) {
     g.mover->Start(top, dest);
     g.phase = Phase::Moving;
     Json(res, 200, "{\"ok\":true,\"count\":" + Num(top.size()) + "}");
+  } else if (p == "/api/report/targets") {
+    Json(res, 200, TargetsJson());
+  } else if (p == "/api/report/start" && req.method == "POST") {
+    if (g.phase == Phase::Scanning || g.phase == Phase::Deleting || g.phase == Phase::Moving || ReportBusy()) {
+      Error(res, 409, "busy");
+      return;
+    }
+    // All drives (but the system partition), or the listed drives asked for.
+    auto list = ListStorages(g_extra);
+    auto job = std::make_unique<State::ReportJob>();
+    if (req.query.count("all")) {
+      for (const Storage& st : list)
+        if (st.kind != "system") job->scope.push_back(st);
+    } else {
+      auto it = req.query.find("paths");
+      std::string plist = it == req.query.end() ? "" : it->second;
+      size_t pos = 0;
+      while (pos < plist.size()) {
+        size_t c = plist.find('\n', pos);
+        if (c == std::string::npos) c = plist.size();
+        std::string path = plist.substr(pos, c - pos);
+        pos = c + 1;
+        for (const Storage& st : list) {
+          bool dup = false;
+          for (const Storage& have : job->scope) dup = dup || have.path == st.path;
+          if (st.path == path && !dup) job->scope.push_back(st);
+        }
+      }
+    }
+    if (job->scope.empty()) {
+      Error(res, 400, "No drive to report on");
+      return;
+    }
+    if (req.query.count("all")) job->title = "All drives";
+    for (const Storage& st : job->scope)
+      if (!req.query.count("all")) job->title += (job->title.empty() ? "" : ", ") + st.name;
+    job->drives.resize(job->scope.size());
+    for (size_t i = 0; i < job->scope.size(); i++) {
+      // The drive scanned already: no need to scan it again.
+      if (g.root && g.phase == Phase::Ready && g.storage.path == job->scope[i].path) {
+        Storage st = job->scope[i];
+        job->drives[i] = ReportDriveJson({g.root, st, g.scanned});
+      } else {
+        job->todo.push_back(i);
+      }
+    }
+    if (!g.games_ready && !g.game_scanner) StartGamesLocked();
+    g.report = std::move(job);
+    Log("report start: %zu drives, %zu to scan", g.report->scope.size(), g.report->todo.size());
+    PollReportLocked();
+    Json(res, 200, ReportStatusJson());
+  } else if (p == "/api/report/status") {
+    Json(res, 200, ReportStatusJson());
+  } else if (p == "/api/report/cancel" && req.method == "POST") {
+    if (ReportBusy()) {
+      g.report.reset();  // stops and waits for its scan
+      Log("report cancelled");
+    }
+    Json(res, 200, "{\"ok\":true}");
+  } else if (p == "/api/report" || (p == "/api/report/save" && req.method == "POST")) {
+    if (!g.report || g.report->html.empty()) {
+      Error(res, 409, "No report is ready");
+      return;
+    }
+    const std::string& name = g.report->name;
+    const std::string& html = g.report->html;
+    if (p == "/api/report") {
+      res.status = 200;
+      res.type = "text/html; charset=utf-8";
+      res.body = html;
+      if (req.query.count("download")) res.headers = "Content-Disposition: attachment; filename=\"" + name + "\"\r\n";
+      return;
+    }
+    // Only a folder from the list, never an arbitrary path.
+    auto it = req.query.find("dest");
+    std::string dest = it == req.query.end() ? "" : it->second;
+    bool ok = false;
+    for (const ReportTarget& t : ReportTargets(g_extra)) ok = ok || t.path == dest;
+    if (!ok) {
+      Error(res, 400, "The report cannot be saved there");
+      return;
+    }
+    std::string path = JoinPath(dest, name);
+    std::string tmp = path + ".part";
+    bool written = false;
+    {
+      std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+      written = f && f.write(html.data(), (std::streamsize)html.size()) && f.flush();
+    }
+    if (!written || std::rename(tmp.c_str(), path.c_str()) != 0) {
+      unlink(tmp.c_str());
+      Log("report save failed: %s", path.c_str());
+      Error(res, 500, "Could not write the file. Is the drive full or read-only?");
+      return;
+    }
+    Log("report saved: %s (%zu bytes)", path.c_str(), html.size());
+    Json(res, 200, "{\"ok\":true,\"path\":" + Str(path) + ",\"size\":" + Num(html.size()) + "}");
   } else if (p == "/api/quit" && req.method == "POST") {
     Log("quit requested");
     Json(res, 200, "{\"ok\":true}");

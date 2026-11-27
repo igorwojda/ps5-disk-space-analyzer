@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disk space report</title>
+<!-- A report exported by Disk Space Analyzer for PS5. Everything it shows is in
+     the data below; it needs no network and no other files. -->
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f4f7fb; --card: #fff; --text: #13233a; --dim: #5b6d84; --line: #e3e9f1;
+  --accent: #2f7de1; --track: #e7edf5; --hover: #f0f5fc; --big: #c2410c; --free: #cfd9e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #081d36; --card: #0e2846; --text: #eaf2ff; --dim: #8fb0d3; --line: #1b3c60;
+          --accent: #58a6ff; --track: #0a2340; --hover: #133456; --big: #ff8f7a; --free: #284a70; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 64px; }
+h1 { margin: 0; font-size: 30px; line-height: 1.2; }
+h2 { margin: 0 0 12px; font-size: 18px; }
+.sub { color: var(--dim); margin-top: 4px; overflow-wrap: anywhere; }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 24px 0 16px; }
+.card { padding: 14px 16px; }
+.card b { display: block; font-size: 22px; line-height: 1.25; }
+.card span { color: var(--dim); font-size: 13px; }
+.usage { padding: 18px; }
+.stack { display: flex; height: 20px; border-radius: 10px; overflow: hidden; background: var(--free); }
+.stack i { display: block; height: 100%; min-width: 2px; border-right: 2px solid var(--card); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 12px; font-size: 13px; color: var(--dim); }
+.legend b { color: var(--text); font-weight: 600; }
+.usage h3 { margin: 18px 0 10px; font-size: 15px; }
+.usage h2 + h3 { margin-top: 0; }
+.usage h3 span { font-weight: 400; color: var(--dim); font-size: 13px; margin-left: 6px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 28px 0 12px; }
+nav button { font: inherit; font-weight: 600; padding: 7px 16px; border-radius: 999px; cursor: pointer;
+             border: 1px solid var(--line); background: var(--card); color: var(--text); }
+nav button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+nav input { margin-left: auto; min-width: 240px; flex: 0 1 320px; font: inherit; padding: 7px 14px;
+            border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.list { overflow: hidden; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 160px 100px 100px; gap: 14px; align-items: center;
+       padding: 7px 16px; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row.head { font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.row.dir { cursor: pointer; }
+.row.dir:hover, .row.dir:focus-visible { background: var(--hover); outline: none; }
+.name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.name .caret { flex: none; width: 14px; color: var(--dim); font-size: 11px; transition: transform .12s; }
+.open > .row .caret { transform: rotate(90deg); }
+.name svg { flex: none; width: 18px; height: 18px; }
+.name .txt { min-width: 0; }
+.name .n { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name .t { display: block; font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.size { font-weight: 600; }
+.size.big { color: var(--big); }
+.cnt { color: var(--dim); }
+.pct { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; }
+.pct .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.pct .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.pct span { width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.more { padding: 8px 16px; border-top: 1px solid var(--line); }
+.more button { font: inherit; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 0; }
+.note { color: var(--dim); font-size: 13px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.empty { padding: 28px 16px; text-align: center; color: var(--dim); }
+footer { margin-top: 28px; color: var(--dim); font-size: 13px; }
+footer p { margin: 4px 0; }
+@media (max-width: 720px) {
+  main { padding: 20px 12px 48px; }
+  h1 { font-size: 24px; }
+  .row { grid-template-columns: minmax(0, 1fr) 90px; gap: 10px; padding: 7px 12px; }
+  .row .pct, .row .cnt { display: none; }
+  nav input { margin-left: 0; flex: 1 1 100%; min-width: 0; }
+}
+@media print {
+  body { background: #fff; }
+  nav input { display: none; }
+}
+</style>
+</head>
+<body>
+<main id="app"><noscript>This report needs JavaScript to show its contents.</noscript></main>
+<script id="data" type="application/json">/*REPORT_DATA*/</script>
+<script>
+'use strict';
+(function () {
+  const app = document.getElementById('app');
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function fmtSize(b) {
+    if (!b) return '0 KB';
+    const u = ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let v = b, i = 0;
+    while (v >= 1000 && i < 5) { v /= 1000; i++; }
+    if (i === 0) return b + ' bytes';
+    return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + ' ' + u[i];
+  }
+  const fmtCount = (n) => Number(n).toLocaleString();
+  const fmtPct = (f) => !isFinite(f) ? '' : f >= 0.1 ? (f * 100).toFixed(0) + '%' : f >= 0.001 ? (f * 100).toFixed(1) + '%' : '<0.1%';
+  const fmtDate = (t) => t ? new Date(t * 1000).toLocaleString() : 'unknown';
+
+  let D;
+  try { D = JSON.parse(document.getElementById('data').textContent); } catch (e) { D = null; }
+  if (!D || !D.drives || !D.drives.length) {
+    app.innerHTML = '<h1>Disk space report</h1><p class="sub">This file has no report data. Export a report from Disk Space Analyzer.</p>';
+    return;
+  }
+
+  // Tree entries: a folder is [name, size, files, children, flags, title]
+  // (flags: 1 another volume, 2 not fully readable); a file [name, size];
+  // a folder's smaller files added up [count, size, each smaller than this].
+  const isGroup = (a) => typeof a[0] === 'number';
+  const isDir = (a) => a.length >= 4;
+  const ICON_DIR = '<svg viewBox="0 0 40 40"><rect y="5" width="18" height="9" rx="2.5" fill="#3f7fc4"/><rect y="9" width="40" height="27" rx="3.5" fill="#58a6ff"/></svg>';
+  const ICON_FILE = '<svg viewBox="0 0 40 40"><path d="M7 2h18l8 8v28H7z" fill="#c9d5e5"/><path d="M25 2v8h8z" fill="#8fa3bb"/></svg>';
+  const ICON_MANY = '<svg viewBox="0 0 40 40"><path d="M11 6h14l7 7v23H11z" fill="#a9b8cc"/><path d="M6 2h14l7 7v23H6z" fill="#c9d5e5"/></svg>';
+  const ICON_DRIVE = '<svg viewBox="0 0 40 40"><rect y="10" width="40" height="20" rx="4" fill="#58a6ff"/><circle cx="32" cy="20" r="2.5" fill="#d5e6fb"/><rect x="5" y="18.5" width="17" height="3" fill="#d5e6fb"/></svg>';
+  const COLORS = ['#3b82f6', '#f97316', '#10b981', '#a855f7', '#ef4444', '#eab308', '#06b6d4', '#ec4899'];
+
+  // Each drive's tree root goes by the drive's name, with its path below.
+  const drives = D.drives;
+  const multi = drives.length > 1;
+  const driveOf = new Map();
+  for (const d of drives) {
+    const t = d.tree;
+    t[0] = d.storage.name || d.storage.path;
+    if (t.length < 5) t[4] = 0;
+    t[5] = d.storage.path;
+    driveOf.set(t, d);
+  }
+  const sum = (f) => drives.reduce((t, d) => t + f(d), 0);
+  // The Folders tab lists this folder's contents: the drive, or every drive.
+  const top = multi ? ['All drives', sum((d) => d.tree[1]), sum((d) => d.tree[2]), drives.map((d) => d.tree)] : drives[0].tree;
+
+  // Parents of folders, for full paths.
+  const parent = new Map();
+  (function link(n) {
+    for (const c of n[3]) if (!isGroup(c) && isDir(c)) { parent.set(c, n); link(c); }
+  })(top);
+  function pathOf(dir) {
+    const parts = [];
+    let n = dir;
+    while (n && !driveOf.has(n)) { parts.push(n[0]); n = parent.get(n); }
+    const base = n ? driveOf.get(n).storage.path : '';
+    parts.reverse();
+    return parts.length ? base.replace(/\/$/, '') + '/' + parts.join('/') : base;
+  }
+
+  // ---------------------------------------------------------------- header
+  const usedOf = (d) => d.storage.total ? d.storage.total - d.storage.free : d.tree[1];
+  const total = sum((d) => d.storage.total || 0), free = sum((d) => d.storage.free || 0);
+  const scanned = top[1], grouped = sum((d) => d.grouped || 0);
+  const title = D.title || (multi ? 'All drives' : drives[0].storage.name || drives[0].storage.path);
+  const sub = multi ? drives.map((d) => d.storage.name).join(' · ')
+                    : drives[0].storage.path + ' · scanned ' + fmtDate(drives[0].scanned);
+  let h = `<header><h1>Disk space report: ${esc(title)}</h1><div class="sub">${esc(sub)}</div></header>
+    <div class="cards">
+      ${card(fmtSize(sum(usedOf)), total ? `used of ${fmtSize(total)}` : 'used')}
+      ${total ? card(fmtSize(free), 'free') : ''}
+      ${card(fmtSize(scanned), 'found by the scan')}
+      ${card(fmtCount(top[2]), 'files')}
+      ${card(fmtCount(sum((d) => d.folders || 0)), 'folders')}
+      ${D.games && D.games.length ? card(fmtCount(D.games.length), 'games') : ''}
+    </div>`;
+
+  // Each drive's biggest top-level folders as parts of the whole drive.
+  function usageHtml(d) {
+    const st = d.storage, root = d.tree, used = usedOf(d);
+    const shown = root[3].filter((c) => !isGroup(c)).slice(0, multi ? 5 : COLORS.length);
+    const rest = root[1] - shown.reduce((t, c) => t + c[1], 0);
+    const whole = Math.max(st.total || 0, root[1]) || 1;
+    const segs = shown.map((c, i) => ({ name: c[0], title: c[5], size: c[1], color: COLORS[i] }));
+    if (rest > whole * 0.005) segs.push({ name: 'Everything else', size: rest, color: '#8fa3bb' });
+    const other = st.total ? Math.max(0, used - root[1]) : 0;  // used, but outside what the scan could read
+    if (other > whole * 0.005) segs.push({ name: 'Used outside the scanned folders', size: other, color: '#64748b' });
+    const head = multi ? `<h3>${esc(st.name)} <span>${esc(st.path)} &middot; ${fmtSize(used)} used${st.total ? ` of ${fmtSize(st.total)}` : ''} &middot; scanned ${esc(fmtDate(d.scanned))}</span></h3>` : '';
+    return `${head}<div class="stack">
+      ${segs.map((s) => `<i style="width:${(s.size / whole * 100).toFixed(3)}%;background:${s.color}" title="${esc(s.name)}: ${fmtSize(s.size)}"></i>`).join('')}
+      </div><div class="legend">
+      ${segs.map((s) => `<span><i class="dot" style="background:${s.color}"></i>${esc(s.title || s.name)} <b>${fmtSize(s.size)}</b></span>`).join('')}
+      ${st.total ? `<span><i class="dot" style="background:var(--free)"></i>Free <b>${fmtSize(st.free)}</b></span>` : ''}
+      </div>`;
+  }
+  h += `<section class="box usage"><h2>Where the space goes</h2>${drives.map(usageHtml).join('')}</section>`;
+
+  const tabs = [['folders', multi ? 'Drives' : 'Folders'], ['files', 'Biggest files']];
+  if (D.games && D.games.length) tabs.push(['games', 'Games']);
+  h += `<nav>${tabs.map(([k, l], i) => `<button type="button" data-tab="${k}"${i ? '' : ' class="on"'}>${l}</button>`).join('')}
+    <input type="search" id="q" placeholder="Search files and folders" aria-label="Search files and folders"></nav>
+    <section class="box list" id="view"></section>`;
+
+  h += `<footer><p>Made with ${esc(D.app)} ${esc(D.version)} on ${esc(fmtDate(D.created))}.</p>
+    <p>Sizes are the space each item takes on disk (1 GB = 1,000,000,000 bytes). Percentages are of the folder an item is in.</p>
+    ${grouped ? `<p>To keep this file small, the smallest ${fmtCount(grouped)} files are added up per folder as &ldquo;smaller files&rdquo;.</p>` : ''}
+    </footer>`;
+  app.innerHTML = h;
+  document.title = 'Disk space report: ' + title;
+
+  function card(big, label) { return `<div class="box card"><b>${big}</b><span>${label}</span></div>`; }
+
+  const view = document.getElementById('view');
+  const HEAD = (c2, c3, c4) => `<div class="row head"><div>Name</div><div>${c2}</div><div class="num">${c3}</div><div class="num">${c4}</div></div>`;
+
+  // ---------------------------------------------------------------- folders
+  const PAGE = 300;
+
+  function nameCell(icon, name, sub, caret) {
+    return `<div class="name">${caret ? '<span class="caret">&#9654;</span>' : '<span class="caret"></span>'}${icon}
+      <span class="txt"><span class="n" title="${esc(name)}">${esc(name)}</span>${sub ? `<span class="t">${esc(sub)}</span>` : ''}</span></div>`;
+  }
+  function pctCell(f) {
+    return `<div class="pct"><div class="bar"><i style="width:${Math.max(0, Math.min(1, f)) * 100}%"></i></div><span>${fmtPct(f)}</span></div>`;
+  }
+  function sizeCell(b) { return `<div class="num size${b >= 1e9 ? ' big' : ''}">${fmtSize(b)}</div>`; }
+
+  function entryHtml(c, parentSize) {
+    const f = parentSize ? c[1] / parentSize : 0;
+    if (isGroup(c)) {
+      return `<div class="item"><div class="row">${nameCell(ICON_MANY, `${fmtCount(c[0])} smaller files`, `each under ${fmtSize(c[2])}`)}
+        ${pctCell(f)}${sizeCell(c[1])}<div class="num cnt">${fmtCount(c[0])}</div></div></div>`;
+    }
+    if (!isDir(c)) {
+      return `<div class="item"><div class="row">${nameCell(ICON_FILE, c[0])}${pctCell(f)}${sizeCell(c[1])}<div class="num cnt"></div></div></div>`;
+    }
+    const flags = c[4] || 0;
+    const sub = [c[5], flags & 1 ? 'another drive' : '', flags & 2 ? 'partly unreadable' : ''].filter(Boolean).join(' · ');
+    const open = c[3].length > 0;
+    return `<div class="item"><div class="row${open ? ' dir' : ''}"${open ? ' tabindex="0" role="button" aria-expanded="false"' : ''}>
+      ${nameCell(driveOf.has(c) ? ICON_DRIVE : ICON_DIR, c[0], sub, open)}${pctCell(f)}${sizeCell(c[1])}<div class="num cnt">${fmtCount(c[2])}</div></div>
+      <div class="kids" hidden></div></div>`;
+  }
+
+  // Children of a folder, a page at a time; each item keeps its entry.
+  function fill(box, dir, from, depth) {
+    const kids = dir[3];
+    const end = Math.min(kids.length, from + PAGE);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = kids.slice(from, end).map((c) => entryHtml(c, dir[1])).join('');
+    const items = [...tmp.children];
+    items.forEach((el, i) => {
+      el._e = kids[from + i];
+      el._depth = depth;
+      el.firstElementChild.style.paddingLeft = (16 + depth * 22) + 'px';
+    });
+    const old = box.querySelector(':scope > .more');
+    if (old) old.remove();
+    box.append(...items);
+    if (end < kids.length) {
+      const more = document.createElement('div');
+      more.className = 'more';
+      more.style.paddingLeft = (40 + depth * 22) + 'px';
+      more.innerHTML = `<button type="button">Show ${fmtCount(Math.min(PAGE, kids.length - end))} more of ${fmtCount(kids.length - end)}</button>`;
+      more.firstChild.onclick = () => fill(box, dir, end, depth);
+      box.append(more);
+    }
+  }
+
+  function toggle(row) {
+    const item = row.parentElement;
+    const kids = item.querySelector(':scope > .kids');
+    if (!kids) return;
+    // Folders fill on first open; a game's rows are already there.
+    if (!kids.childElementCount && item._e) fill(kids, item._e, 0, item._depth + 1);
+    const open = kids.hidden;
+    kids.hidden = !open;
+    item.classList.toggle('open', open);
+    row.setAttribute('aria-expanded', String(open));
+  }
+
+  function showFolders() {
+    view.innerHTML = HEAD('Share of folder', 'Size', 'Files') + '<div class="kids"></div>';
+    const box = view.lastElementChild;
+    if (!top[3].length) { box.outerHTML = '<div class="empty">This storage is empty.</div>'; return; }
+    fill(box, top, 0, 0);
+  }
+
+  view.addEventListener('click', (e) => {
+    const row = e.target.closest('.row.dir');
+    if (row) toggle(row);
+  });
+  view.addEventListener('keydown', (e) => {
+    const row = e.target.closest('.row.dir');
+    if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(row); }
+  });
+
+  // ---------------------------------------------------------------- lists
+  // Every file (and folder, for search) with the folder it is in.
+  function walk(fn) {
+    const stack = drives.map((d) => d.tree);
+    while (stack.length) {
+      const d = stack.pop();
+      for (const c of d[3]) {
+        if (isGroup(c)) continue;
+        fn(c, d);
+        if (isDir(c)) stack.push(c);
+      }
+    }
+  }
+
+  function flatRow(c, dir, ofSize) {
+    const icon = isDir(c) ? ICON_DIR : ICON_FILE;
+    const where = (dir[5] && !driveOf.has(dir) ? dir[5] + ' · ' : '') + pathOf(dir);
+    return `<div class="row">${nameCell(icon, c[0], where)}${pctCell(ofSize ? c[1] / ofSize : 0)}${sizeCell(c[1])}
+      <div class="num cnt">${isDir(c) ? fmtCount(c[2]) : ''}</div></div>`;
+  }
+
+  let biggest = null;
+  function showFiles() {
+    if (!biggest) {
+      const all = [];
+      walk((c, d) => { if (!isDir(c)) all.push([c, d]); });
+      all.sort((a, b) => b[0][1] - a[0][1]);
+      biggest = all.slice(0, 200);
+    }
+    view.innerHTML = HEAD('Share of storage', 'Size', '') +
+      (biggest.length ? biggest.map(([c, d]) => flatRow(c, d, scanned)).join('') : '<div class="empty">No files.</div>') +
+      `<div class="note">The ${fmtCount(biggest.length)} biggest files on ${esc(multi ? title.replace(/^All/, 'all') : title)}.</div>`;
+  }
+
+  function showGames() {
+    const all = D.games.reduce((t, g) => t + g.size, 0);
+    let s = HEAD('Share of all games', 'Size', 'Files') + '<div class="kids">';
+    for (const g of D.games) {
+      const sub = (g.title ? g.id + ' · ' : '') + g.parts.map((p) => p.cat).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+      s += `<div class="item"><div class="row dir" tabindex="0" role="button" aria-expanded="false">
+        ${nameCell(ICON_DIR, g.title || g.id, sub, true)}${pctCell(all ? g.size / all : 0)}${sizeCell(g.size)}
+        <div class="num cnt">${fmtCount(g.files)}</div></div><div class="kids" hidden>
+        ${g.parts.map((p) => `<div class="item"><div class="row" style="padding-left:38px">
+          ${nameCell(ICON_DIR, p.cat, p.volume + ' · ' + p.path)}${pctCell(g.size ? p.size / g.size : 0)}${sizeCell(p.size)}
+          <div class="num cnt">${fmtCount(p.files)}</div></div></div>`).join('')}</div></div>`;
+    }
+    s += '</div><div class="note">Everything each game uses on every storage: the game, updates, add-ons, saves, captures and more.' +
+      (D.gamesReady ? '' : ' The games were still being counted when this report was made, so this list may be incomplete.') + '</div>';
+    view.innerHTML = s;
+  }
+
+  function showSearch(q) {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hits = [];
+    walk((c, d) => {
+      const n = c[0].toLowerCase(), t = isDir(c) && c[5] ? c[5].toLowerCase() : '';
+      if (words.every((w) => n.includes(w) || t.includes(w))) hits.push([c, d]);
+    });
+    hits.sort((a, b) => b[0][1] - a[0][1]);
+    const list = hits.slice(0, 300);
+    view.innerHTML = HEAD('Share of storage', 'Size', 'Files') +
+      (list.length ? list.map(([c, d]) => flatRow(c, d, scanned)).join('') : '<div class="empty">Nothing matches.</div>') +
+      (hits.length > list.length ? `<div class="note">The ${fmtCount(list.length)} biggest of ${fmtCount(hits.length)} matches.</div>` : '');
+  }
+
+  // ---------------------------------------------------------------- tabs
+  let tab = 'folders';
+  const SHOW = { folders: showFolders, files: showFiles, games: showGames };
+  const q = document.getElementById('q');
+  function update() {
+    const s = q.value.trim();
+    document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', !s && b.dataset.tab === tab));
+    if (s) showSearch(s); else SHOW[tab]();
+  }
+  document.querySelector('nav').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-tab]');
+    if (!b) return;
+    tab = b.dataset.tab;
+    q.value = '';
+    update();
+  });
+  let qt = 0;
+  q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(update, 180); });
+  update();
+})();
+</script>
+</body>
+</html>

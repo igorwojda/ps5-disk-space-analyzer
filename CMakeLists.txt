@@ -13,6 +13,7 @@ set(WEB_ASSETS
   "/index.html|text/html|web/index.html"
   "/app.css|text/css|web/app.css"
   "/app.js|application/javascript|web/app.js"
+  "/report.html|text/html|web/report.html"
   "/icon0.png|image/png|assets/icon.png"
   "/manifest.webmanifest|application/manifest+json|web/manifest.webmanifest"
   "/fonts/Lato-Regular.ttf|font/ttf|assets/fonts/LatoLatin-Regular.ttf"
@@ -71,6 +72,7 @@ add_executable(disk-space-analyzer
   src/http.cpp
   src/launcher.cpp
   src/platform.cpp
+  src/report.cpp
   src/system.cpp
   src/tree.cpp
   ${GEN}/web_assets_table.cpp
