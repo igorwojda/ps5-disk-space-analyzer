@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(disk-space-analyzer VERSION 1.0.0 LANGUAGES C CXX)
-set(APP_VERSION "${PROJECT_VERSION}-beta6")
+set(APP_VERSION "${PROJECT_VERSION}-beta7")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
