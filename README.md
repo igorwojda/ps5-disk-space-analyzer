@@ -4,8 +4,9 @@ Find what takes space on a jailbroken PS5 and clean it up: **scan → select →
 
 `disk-analyzer.elf` is a payload that runs in the background and serves a web
 UI. It adds a **Disk Space Analyzer** tile to the **Media** tab that opens the
-UI in the PS5 browser. You can also open the UI from a phone or PC on the same
-network.
+UI in the PS5 browser. The same UI, with every feature, works from a phone or
+PC on the same network: the bar at the bottom of the screen shows the app
+version and the address to open (`http://<ps5-ip>:8833/`).
 
 - Storage picker: internal storage (`/user`), `/data`, M.2 / extended storage,
   USB drives, the system partition. Shows used and free space for each.
@@ -20,8 +21,9 @@ network.
 
 1. Send `disk-analyzer.elf` to the console's ELF loader (port 9021):
    `make send PS5_HOST=<ip>`, or `nc -q0 <ip> 9021 < disk-analyzer.elf`.
-2. A toast says "Disk Space Analyzer is running".
-3. Open **Media → Disk Space Analyzer**, or browse to `http://<ps5-ip>:8833/`.
+2. A toast says "Disk Space Analyzer 1.0.0 is running" with the address.
+3. Open **Media → Disk Space Analyzer**, or browse to the address from the
+   toast (also shown in the bottom bar) on a computer or phone.
 
 Send the ELF again to update it: the new copy replaces the running one. The
 payload stops when the console reboots, so send it again after a restart (or
@@ -81,6 +83,8 @@ make toolchain   # PS5 payload SDK into .toolchain (~700 MB, no sudo)
 make package     # -> dist/disk-analyzer.elf
 ```
 
+The version comes from `project(... VERSION x.y.z)` in `CMakeLists.txt`.
+
 Development on macOS or Linux, using the same server code:
 
 ```sh
@@ -94,7 +98,7 @@ make run                                   # http://localhost:8833/, UI served f
 | --- | --- |
 | `src/main.cpp` | Payload start: single instance, port, tile, toast |
 | `src/http.*` | Minimal HTTP server (thread per connection) |
-| `src/api.*` | JSON API: storages, scan, folders, biggest files, delete |
+| `src/api.*` | JSON API: version/address, storages, scan, folders, biggest files, delete |
 | `src/tree.*` | File tree, background scanner, background deleter |
 | `src/platform.*` | Storage list, free space, protected paths, warnings |
 | `src/launcher.*` | Media tile (`/user/app/DSAN00001`, category 65536, `deeplinkUri`) |

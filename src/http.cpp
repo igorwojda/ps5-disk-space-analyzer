@@ -46,6 +46,29 @@ unsigned short FindFreePort(unsigned short start) {
   return 0;
 }
 
+std::string LanAddress() {
+  // Connecting a UDP socket sends nothing; it only picks the outgoing
+  // interface, whose address getsockname() then reports.
+  int fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (fd < 0) return "";
+  sockaddr_in a{};
+  a.sin_family = AF_INET;
+  a.sin_port = htons(53);
+  inet_pton(AF_INET, "8.8.8.8", &a.sin_addr);
+  std::string out;
+  sockaddr_in me{};
+  socklen_t len = sizeof me;
+  if (connect(fd, (sockaddr*)&a, sizeof a) == 0 && getsockname(fd, (sockaddr*)&me, &len) == 0 &&
+      me.sin_addr.s_addr != htonl(INADDR_ANY)) {
+    char buf[INET_ADDRSTRLEN];
+    if (inet_ntop(AF_INET, &me.sin_addr, buf, sizeof buf)) out = buf;
+  }
+  close(fd);
+  return out;
+}
+
+bool IsLoopback(const std::string& ip) { return ip.empty() || ip.compare(0, 4, "127.") == 0; }
+
 static int Hex(char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -122,6 +145,12 @@ static void* Connection(void* arg) {
 
   Request req;
   Response res;
+  sockaddr_in local{};
+  socklen_t local_len = sizeof local;
+  char ip[INET_ADDRSTRLEN];
+  if (getsockname(fd, (sockaddr*)&local, &local_len) == 0 && local.sin_family == AF_INET &&
+      inet_ntop(AF_INET, &local.sin_addr, ip, sizeof ip))
+    req.local_ip = ip;
   if (header_end == std::string::npos) {
     close(fd);
     return nullptr;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(disk-analyzer C CXX)
+project(disk-analyzer VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,6 +74,7 @@ add_executable(disk-analyzer
   ${ASSET_SOURCES}
 )
 target_include_directories(disk-analyzer PRIVATE src)
+target_compile_definitions(disk-analyzer PRIVATE APP_VERSION="${PROJECT_VERSION}")
 target_compile_options(disk-analyzer PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_link_libraries(disk-analyzer PRIVATE Threads::Threads)
 

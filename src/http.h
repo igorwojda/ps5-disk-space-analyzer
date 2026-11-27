@@ -12,6 +12,7 @@ struct Request {
   std::string path;                          // without the query string
   std::map<std::string, std::string> query;  // decoded
   std::string body;
+  std::string local_ip;  // our address on the connection the request came in on
 };
 
 struct Response {
@@ -26,6 +27,12 @@ using Handler = std::function<void(const Request&, Response&)>;
 
 // First free port starting at `port`, or 0.
 unsigned short FindFreePort(unsigned short port);
+
+// IPv4 address of the LAN interface (the one with the default route), or "".
+std::string LanAddress();
+
+// True for 127.x.x.x and an empty string.
+bool IsLoopback(const std::string& ip);
 
 // Blocks serving requests until Stop() is called.
 int Serve(unsigned short port, Handler handler);

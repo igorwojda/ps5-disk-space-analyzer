@@ -39,6 +39,7 @@ struct State {
 State g;
 std::string g_web_dir;
 std::vector<std::string> g_extra;  // extra folders offered as storages
+unsigned short g_port = 0;
 
 // ---------------------------------------------------------------- json
 
@@ -280,15 +281,24 @@ void Static(const Request& req, Response& res) {
 
 }  // namespace
 
-void ApiInit(const std::string& web_dir, const std::vector<std::string>& extra) {
+void ApiInit(const std::string& web_dir, const std::vector<std::string>& extra, unsigned short port) {
   g_web_dir = web_dir;
   g_extra = extra;
+  g_port = port;
 }
 
 void ApiHandle(const Request& req, Response& res) {
   const std::string& p = req.path;
   if (p.compare(0, 5, "/api/") != 0) {
     Static(req, res);
+    return;
+  }
+
+  if (p == "/api/info") {
+    // A request from another device arrived on the LAN address already. The
+    // PS5 browser uses 127.0.0.1, so ask the routing table instead.
+    std::string ip = IsLoopback(req.local_ip) ? LanAddress() : req.local_ip;
+    Json(res, 200, "{\"version\":" + Str(APP_VERSION) + ",\"ip\":" + Str(ip) + ",\"port\":" + Num(g_port) + "}");
     return;
   }
 

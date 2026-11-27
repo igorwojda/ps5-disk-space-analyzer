@@ -1010,6 +1010,20 @@ function renderDialog() {
     </div></div>`;
 }
 
+// ================================================================ status bar
+
+// Version, and the address another device on the network can open.
+async function loadInfo() {
+  let info;
+  try { info = await api('/api/info'); } catch (e) { return; }
+  const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+  const host = info.ip || (local ? '' : location.hostname);
+  const port = info.port || location.port;
+  const url = host ? `http://${host}:${port}/` : `http://&lt;PS5 IP&gt;:${port}/`;
+  $('#statusbar').innerHTML = `<span>Disk Space Analyzer <b>v${esc(info.version)}</b></span>
+    <span>Open on a computer or phone: <b>${host ? esc(url) : url}</b></span>`;
+}
+
 // ================================================================ layout + start
 
 function fit() {
@@ -1022,6 +1036,7 @@ window.addEventListener('resize', fit);
 async function start() {
   fit();
   render();
+  loadInfo();
   let st = null;
   try { st = await api('/api/status'); } catch (e) { /* server just started */ }
   await loadStorages();

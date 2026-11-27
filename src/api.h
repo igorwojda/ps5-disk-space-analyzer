@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The JSON API and static files behind the web UI.
 //
+//   GET  /api/info                app version, LAN address and port
 //   GET  /api/storages            storages with free/total
 //   POST /api/scan?path=P         start scanning P (replaces the last scan)
 //   POST /api/cancel              cancel the running scan
@@ -18,5 +19,6 @@
 
 // web_dir: serve the UI from disk (development), "" = built-in copy.
 // extra: folders offered on the storage list besides the defaults.
-void ApiInit(const std::string& web_dir, const std::vector<std::string>& extra);
+// port: the port the server listens on (shown in the UI).
+void ApiInit(const std::string& web_dir, const std::vector<std::string>& extra, unsigned short port);
 void ApiHandle(const Request& req, Response& res);

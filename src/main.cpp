@@ -91,16 +91,19 @@ int main(int argc, char* argv[]) {
     Notify("Disk Space Analyzer: no free network port");
     return 1;
   }
-  ApiInit(web_dir, extra);
+  ApiInit(web_dir, extra, port);
+  std::string ip = LanAddress();
+  std::string url = "http://" + (ip.empty() ? std::string("<PS5 IP>") : ip) + ":" + std::to_string(port);
+  Log("version %s, %s", APP_VERSION, url.c_str());
 
   if (InstallLauncher(port) == 0) {
-    Notify("Disk Space Analyzer is running\nOpen it from Media, or http://<PS5 IP>:%u", port);
+    Notify("Disk Space Analyzer %s is running\nOpen it from Media, or %s", APP_VERSION, url.c_str());
   } else {
-    Notify("Disk Space Analyzer is running on port %u\n(the Media tile could not be added, see log)",
-           port);
+    Notify("Disk Space Analyzer %s is running on %s\n(the Media tile could not be added, see log)",
+           APP_VERSION, url.c_str());
   }
 #if !defined(__PROSPERO__)
-  std::printf("Open http://localhost:%u/\n", port);
+  std::printf("Open http://localhost:%u/ (LAN: %s/)\n", port, url.c_str());
   std::fflush(stdout);
 #endif
 
