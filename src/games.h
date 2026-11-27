@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Game names and icons for folders named after a title ID (PPSA01325, CUSA00207),
 // and the space each game takes across all its folders.
 #pragma once

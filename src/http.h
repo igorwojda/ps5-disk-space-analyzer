@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Minimal HTTP/1.1 server: one thread per connection, Connection: close.
 // Enough for a single-page UI and a small JSON API.
 #pragma once

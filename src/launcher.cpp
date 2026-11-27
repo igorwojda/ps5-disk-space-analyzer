@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Same mechanism as owendswang/ps5-web-file-manager, which is known to work:
 // a title of category 65536 (Media) whose deeplinkUri points the browser at

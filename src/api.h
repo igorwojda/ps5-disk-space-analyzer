@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // The JSON API and static files behind the web UI.
 //
 //   GET  /api/info                app version, LAN address and port
