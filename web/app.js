@@ -270,6 +270,7 @@ function gameItem(g) {
     id: p.node != null ? p.node : null, parentId: p.parent != null ? p.parent : -1,
     cid: 'p:' + p.path, gid: g.id, path: p.path, name: p.cat, title, volume: p.volume,
     size: p.size, files: p.files, dir: true, error: p.error, protected: p.protected, warn: p.warn,
+    uninstall: p.uninstall, removedWith: p.removedWith,
   }));
   return { kind: 'game', id: 'g:' + g.id, cid: 'g:' + g.id, gid: g.id, name: title, sub: g.title ? g.id : '', title: g.title,
            icon: g.icon, size: g.size, files: g.files, dir: true, parts };
@@ -474,12 +475,22 @@ function openReview() {
 function askDelete() {
   const list = markedList();
   if (!list.length) return;
-  let files = 0, warn = '';
-  for (const m of list) { files += m.files; if (!warn && m.warn) warn = m.warn; }
+  // Every distinct warning: an uninstall through the console must not hide
+  // behind another item's note.
+  // A game being uninstalled takes its update, add-ons and home screen info
+  // with it: their own warnings (about deleting only part of a game) are moot.
+  let files = 0;
+  const gone = new Set(list.map((m) => m.uninstall).filter(Boolean));
+  const warns = [];
+  for (const m of list) {
+    files += m.files;
+    const moot = !m.uninstall && m.removedWith && gone.has(m.removedWith);
+    if (m.warn && !moot && !warns.includes(m.warn)) warns.push(m.warn);
+  }
   showDialog({
     title: `Delete ${fmtCount(list.length)} ${list.length === 1 ? 'item' : 'items'}?`,
     lines: [`${fmtSize(markedBytes())} in ${fmtCount(files)} files will be permanently deleted.`, 'This cannot be undone.'],
-    warning: warn,
+    warning: warns.slice(0, 3).join(' '),
     buttons: ['Cancel', 'Hold to delete'],
     cancel: 0, hold: 1, focus: 1, danger: true,
     onChoose: (i) => { if (i === 1) runDelete(list); },
@@ -514,9 +525,11 @@ async function pollDelete() {
   S.marked.clear();
   await reloadAfterChange(st);
   showDialog({
-    title: r.errors ? 'Cleanup finished with problems' : 'Cleanup complete',
+    title: r.errors || (r.notes || []).length ? 'Cleanup finished with problems' : 'Cleanup complete',
     lines: [`Freed ${fmtSize(r.freed)}.`, `${fmtCount(r.removed)} of ${fmtCount(r.total)} selected items removed.`],
-    warning: r.errors ? `${fmtCount(r.errors)} entries could not be deleted (in use or read-only).` : '',
+    // The server's own words first (an uninstall the console refused), then the count.
+    warning: (r.notes || []).slice(0, 3).concat(
+      r.errors && !(r.notes || []).length ? [`${fmtCount(r.errors)} entries could not be deleted (in use or read-only).`] : []).join(' '),
     buttons: ['OK'],
   });
 }
@@ -1588,7 +1601,7 @@ function iconHtml(item) {
 
 // Kinds of data in a game row, in a grid of two columns of three lines filled
 // column by column: game files first, then the player's own data and the rest.
-const GAME_FILES = ['Game', 'Game dump', 'Update', 'Add-ons', 'Downloads', 'Install data'];
+const GAME_FILES = ['Game', 'Game dump', 'PS5 title', 'Update', 'Add-ons', 'Downloads', 'Install data'];
 const KIND_DOT = { Saves: '#5be0b5', Captures: '#f0a0d8', Metadata: '#8fa3bb', Other: '#8fa3bb' };
 
 function kindGrid(kinds) {
@@ -1842,9 +1855,16 @@ function renderReview() {
   h += '</div>' + scrollbar(S.rscroll, list.length);
 
   const bytes = markedBytes();
+  // A game being uninstalled takes its update, add-ons and home screen info
+  // with it: their own warnings (about deleting only part of a game) are moot.
   let files = 0;
+  const gone = new Set(list.map((m) => m.uninstall).filter(Boolean));
   const warns = [];
-  for (const m of list) { files += m.files; if (m.warn && !warns.includes(m.warn)) warns.push(m.warn); }
+  for (const m of list) {
+    files += m.files;
+    const moot = !m.uninstall && m.removedWith && gone.has(m.removedWith);
+    if (m.warn && !moot && !warns.includes(m.warn)) warns.push(m.warn);
+  }
   h += `<div class="abs sum-big">${fmtSize(bytes)}</div>
     <div class="abs sum-label">will be freed</div>
     <div class="abs sum-count">${fmtCount(list.length)} items &middot; ${fmtCount(files)} files</div>`;

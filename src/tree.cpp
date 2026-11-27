@@ -221,11 +221,13 @@ Deleter::~Deleter() {
   if (started_) pthread_join(thread_, nullptr);
 }
 
-void Deleter::Start(const std::vector<Target>& targets) {
+void Deleter::Start(const std::vector<Target>& targets, const std::vector<DeletePlan>& plans) {
   for (const Target& t : targets) {
     targets_.push_back(t.node);
     paths_.push_back(t.path);
   }
+  plans_ = plans;
+  plans_.resize(paths_.size());
   started_ = StartThread(&thread_, ThreadMain, this);
   if (!started_) ThreadMain(this);
 }
@@ -235,14 +237,50 @@ std::string Deleter::CurrentPath() {
   return current_;
 }
 
+void Deleter::SetCurrent(const std::string& text) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  current_ = text;
+}
+
+void Deleter::RemovePath(const std::string& path) {
+  struct stat st;
+  if (lstat(path.c_str(), &st) == 0) Remove(path, (uint64_t)st.st_dev);
+}
+
 void* Deleter::ThreadMain(void* p) {
   auto* self = static_cast<Deleter*>(p);
   for (size_t i = 0; i < self->paths_.size(); i++) {
     self->index_ = (int)i;
     const std::string& path = self->paths_[i];
+    const DeletePlan& plan = self->plans_[i];
+    bool keep = false;
+    if (!plan.uninstall.empty()) {
+      self->touched_.insert(self->touched_.end(), plan.system_removes.begin(), plan.system_removes.end());
+      self->touched_.insert(self->touched_.end(), plan.also.begin(), plan.also.end());
+      // Already gone (another item of this delete uninstalled it): nothing to ask.
+      if (TitleListed(plan.uninstall)) {
+        self->SetCurrent("Uninstalling " + plan.uninstall + " through the console");
+        std::string why = UninstallTitle(plan.uninstall);
+        if (why.empty()) {
+          self->freed_ += plan.system_bytes;
+        } else {
+          // The title stays, so its files do too: deleting them would leave a
+          // home screen tile that no longer starts.
+          self->notes_.push_back(why);
+          self->errors_++;
+          keep = true;
+        }
+      }
+    }
+    if (!keep) {
+      for (const std::string& a : plan.also) self->RemovePath(a);
+      self->RemovePath(path);
+    }
     struct stat st;
-    if (lstat(path.c_str(), &st) == 0) self->Remove(path, (uint64_t)st.st_dev);
     bool gone = lstat(path.c_str(), &st) != 0 && errno == ENOENT;
+    if (gone && !plan.playden_forget.empty() && !AskPlaydenToForget(plan.playden_forget))
+      self->notes_.push_back("Playden could not be told about game " + plan.playden_forget +
+                             ": uninstall it in Playden too.");
     self->results_.push_back({self->targets_[i], gone});
   }
   self->done_ = true;
@@ -252,10 +290,7 @@ void* Deleter::ThreadMain(void* p) {
 void Deleter::Remove(const std::string& path, uint64_t dev) {
   struct stat st;
   if (lstat(path.c_str(), &st) != 0) return;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    current_ = path;
-  }
+  SetCurrent(path);
   if (S_ISDIR(st.st_mode)) {
     if ((uint64_t)st.st_dev != dev) {  // never cross into another volume
       errors_++;

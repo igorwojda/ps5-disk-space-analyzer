@@ -261,6 +261,10 @@ std::string GameCategory(const std::string& path) {
     if (seg[i].compare(0, 8, "savedata") == 0 || seg[i] == "np_cloud_save") return "Saves";
     if (seg[i] == "appmeta") return "Metadata";
   }
+  // Playden's PS5 title for a game: what starts it, not its files.
+  const std::string& name = seg.back();
+  if ((parent == "app" || parent == "homebrew") && name.size() == 9 && name.compare(0, 6, "FAKE78") == 0)
+    return "PS5 title";
   if (parent == "app") return "Game";
   if (parent == "patch") return "Update";
   if (parent == "addcont") return "Add-ons";
@@ -274,9 +278,11 @@ GameScanner::~GameScanner() {
   if (started_) pthread_join(thread_, nullptr);
 }
 
-void GameScanner::Start(const std::vector<GameRoot>& roots, const std::vector<std::string>& skip) {
+void GameScanner::Start(const std::vector<GameRoot>& roots, const std::vector<std::string>& skip,
+                        const std::map<std::string, GameFolder>& named) {
   roots_ = roots;
   skip_ = skip;
+  named_ = named;
   pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
@@ -339,10 +345,12 @@ void GameScanner::Find(const std::string& dir, const GameRoot& root, int depth, 
     if (std::find(skip_.begin(), skip_.end(), path) != skip_.end()) continue;
     // A folder named after the game, or a dump (folder or disk image) with
     // the title ID in its name.
-    std::string id = dir && IsGameId(nm) ? nm : EmbeddedGameId(nm);
+    auto known = dir ? named_.find(path) : named_.end();
+    std::string id = known != named_.end() ? known->second.id : dir && IsGameId(nm) ? nm : EmbeddedGameId(nm);
     if (!id.empty()) {
       GamePart part;
-      part.category = id == nm ? GameCategory(path)
+      part.category = known != named_.end() ? known->second.category
+                      : id == nm ? GameCategory(path)
                       : path.find("/playgo/") != std::string::npos ? "Install data"  // EP9000-CUSA00207_00-...
                       : "Game dump";
       part.path = path;

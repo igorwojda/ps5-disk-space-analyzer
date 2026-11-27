@@ -75,6 +75,7 @@ add_executable(disk-space-analyzer
   src/report.cpp
   src/system.cpp
   src/tree.cpp
+  src/uninstall.cpp
   ${GEN}/web_assets_table.cpp
   ${ASSET_SOURCES}
 )

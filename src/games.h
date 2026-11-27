@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -53,12 +54,21 @@ struct GameRoot {
   std::string volume;  // its name
 };
 
-// Finds every folder named after a game's title ID on the given volumes and
-// adds them up per game. Runs on its own thread; poll Done().
+// A folder that belongs to a game though it is not named after it (a Playden
+// game's files, named by store ID).
+struct GameFolder {
+  std::string id;        // title ID
+  std::string category;  // GamePart::category
+};
+
+// Finds every folder named after a game's title ID on the given volumes, and
+// the folders given by path, and adds them up per game. Runs on its own
+// thread; poll Done().
 class GameScanner {
  public:
   ~GameScanner();
-  void Start(const std::vector<GameRoot>& roots, const std::vector<std::string>& skip);
+  void Start(const std::vector<GameRoot>& roots, const std::vector<std::string>& skip,
+             const std::map<std::string, GameFolder>& named = {});
   void Cancel() { cancel_ = true; }
   bool Done() const { return done_.load(); }
   std::vector<GameTotal> Take();  // biggest first; valid once Done()
@@ -72,6 +82,7 @@ class GameScanner {
   bool started_ = false;
   std::vector<GameRoot> roots_;
   std::vector<std::string> skip_;
+  std::map<std::string, GameFolder> named_;
   std::vector<std::pair<std::string, GamePart>> found_;  // (title ID, part)
   std::vector<GameTotal> result_;
   std::atomic<bool> done_{false};

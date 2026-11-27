@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "uninstall.h"
+
 struct Node {
   std::string name;              // root: full path; others: entry name
   Node* parent = nullptr;
@@ -87,7 +89,9 @@ struct PathTarget {
   uint64_t size = 0;  // bytes on disk, for progress
 };
 
-// Deletes a list of paths on its own thread. Never touches the tree.
+// Deletes a list of paths on its own thread. Never touches the tree. A path
+// whose plan names a title has the title uninstalled through the system first,
+// and is left alone when that fails.
 class Deleter {
  public:
   using Target = PathTarget;
@@ -96,7 +100,8 @@ class Deleter {
     bool gone;  // path no longer exists
   };
   ~Deleter();
-  void Start(const std::vector<Target>& targets);
+  // plans: one per target (PlanDelete's), or none for plain deletes.
+  void Start(const std::vector<Target>& targets, const std::vector<DeletePlan>& plans = {});
   bool Done() const { return done_.load(); }
   int Index() const { return index_.load(); }
   size_t Total() const { return paths_.size(); }
@@ -104,17 +109,25 @@ class Deleter {
   uint64_t Errors() const { return errors_.load(); }
   std::string CurrentPath();
   const std::vector<Result>& Results() const { return results_; }
+  // Valid once Done(): what went wrong in words, and other paths that may be
+  // gone now (what the uninstalls removed).
+  const std::vector<std::string>& Notes() const { return notes_; }
+  const std::vector<std::string>& Touched() const { return touched_; }
 
  private:
   static void* ThreadMain(void* self);
   void Remove(const std::string& path, uint64_t dev);
+  void RemovePath(const std::string& path);
+  void SetCurrent(const std::string& text);
 
   pthread_t thread_{};
   bool started_ = false;
   std::mutex mutex_;
   std::vector<Node*> targets_;
   std::vector<std::string> paths_;
+  std::vector<DeletePlan> plans_;
   std::vector<Result> results_;
+  std::vector<std::string> notes_, touched_;
   std::string current_;
   std::atomic<bool> done_{false};
   std::atomic<int> index_{0};

@@ -21,6 +21,14 @@ up space, so you can choose what to remove.
 - 🧹 **Clean up safely:** select what you don't need and see how much space you'll
   get back before you delete. System files are locked, so you can't remove
   anything the console needs.
+- 🗑️ **Keep the console's records in sync:** deleting a game uninstalls it
+  through the system, just like deleting it from the home screen. The console's
+  game database (`app.db`) is updated too, so no broken tile is left in your
+  library. The game's update and add-ons are removed with it; saves are kept.
+- 🪟 **Playden support:** games installed with
+  [Playden](https://github.com/leolobato/playden-ps5) appear by name in the
+  Games tab. Deleting one also removes its PS5 title and tells Playden to drop
+  it from its library, so Playden never shows it as missing. Saves are kept.
 - 📄 **Export a report:** pick one drive or all of them and save one HTML file
   with every folder and file and the space each takes, to keep or share. It
   opens in any browser.
@@ -63,8 +71,16 @@ To try the app on your computer without a PS5:
 make run                    # then open http://localhost:8833/
 ```
 
+To try uninstalls on a computer, point `DSA_CONSOLE_ROOT` at a folder laid out
+like the console (`user/app`, `user/patch`, `user/data/homebrew`,
+`user/data/playden-games`, ...) and scan its `user` folder. An uninstall then
+removes the title's folders, as the console would.
+
 ## Credits
 
 - Media tile approach from
   [ps5-web-file-manager](https://github.com/owendswang/ps5-web-file-manager).
+- Uninstall through the system and Playden's file formats from
+  [playden-ps5](https://github.com/leolobato/playden-ps5) and
+  [prospero-disk](https://github.com/leolobato/prospero-disk).
 - Font: [Lato](https://www.latofonts.com/) (SIL Open Font License).

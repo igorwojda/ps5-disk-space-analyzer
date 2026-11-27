@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "uninstall.h"
+
 bool QuerySpace(const std::string& path, uint64_t* total, uint64_t* free) {
   struct statfs sf;
   if (statfs(path.c_str(), &sf) != 0) return false;
@@ -115,6 +117,27 @@ bool IsProtected(const std::string& p) {
   for (const char* e : exact)
     if (p == e) return true;
   if (p.compare(0, 8, "/mnt/usb") == 0 && p.find('/', 8) == std::string::npos) return true;
+  // Folders holding installed games: deleting one whole would take the games
+  // without telling the console or Playden. Games go one at a time.
+  static const char* holders[] = {"/user/data/playden", "/user/data/playden/games", "/user/data/playden-games",
+                                  "/data/playden", "/data/playden/games", "/data/playden-games"};
+  for (const char* e : holders)
+    if (p == e) return true;
+  for (const char* m : {"/mnt/ext0", "/mnt/ext1"}) {
+    std::string base = m;
+    for (const char* sub : {"/user", "/user/app", "/user/patch", "/user/addcont", "/user/appmeta"})
+      if (p == base + sub) return true;
+  }
+  if (p.compare(0, 5, "/mnt/") == 0) {
+    size_t s = p.find('/', 5);
+    if (s != std::string::npos && (p.compare(s, std::string::npos, "/playden") == 0 ||
+                                   p.compare(s, std::string::npos, "/playden/games") == 0))
+      return true;
+  }
+  // Playden itself: uninstalled from its own settings.
+  if (HasPrefix(p, "/user/data/homebrew/FAKE77031") || HasPrefix(p, "/data/homebrew/FAKE77031") ||
+      HasPrefix(p, "/user/app/FAKE77031"))
+    return true;
 #else
   if (const char* home = std::getenv("HOME"))
     if (p == home) return true;
@@ -123,10 +146,21 @@ bool IsProtected(const std::string& p) {
 }
 
 std::string DeleteWarning(const std::string& p) {
+  std::string w = UninstallWarning(p);
+  if (!w.empty()) return w;
 #if defined(__PROSPERO__)
-  if (HasPrefix(p, "/user/app") || HasPrefix(p, "/user/patch") ||
-      HasPrefix(p, "/user/addcont") || HasPrefix(p, "/user/appmeta"))
-    return "Contains installed game data. The game stays in your library but will not start.";
+  // Part of an installed game, here or on extended storage: the game itself
+  // is uninstalled through the console (UninstallWarning), these are not.
+  std::string q = p;
+  for (const char* m : {"/mnt/ext0", "/mnt/ext1"})
+    if (HasPrefix(q, m)) q = q.substr(std::strlen(m));
+  if (HasPrefix(q, "/user/app"))
+    return "Deleting part of a game can stop it from starting. Delete the whole game to uninstall it.";
+  if (HasPrefix(q, "/user/patch") || HasPrefix(q, "/user/addcont"))
+    return "Deleting only an update or add-on can stop the game from starting. Delete the game itself to "
+           "uninstall all of it.";
+  if (HasPrefix(q, "/user/appmeta"))
+    return "The game's home screen info: its tile can lose its name or picture.";
   if (HasPrefix(p, "/user/home"))
     return "Contains user profile data such as saves.";
 #else

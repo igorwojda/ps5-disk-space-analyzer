@@ -2,7 +2,9 @@
 #include "api.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
+#include <map>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -17,6 +19,7 @@
 #include "report.h"
 #include "system.h"
 #include "tree.h"
+#include "uninstall.h"
 #include "web_assets.h"
 
 namespace {
@@ -42,12 +45,15 @@ struct State {
   int result_seq = 0;
   std::string result_op = "delete";
   uint64_t result_freed = 0, result_errors = 0, result_removed = 0, result_total = 0;
+  std::vector<std::string> result_notes;  // what went wrong, in words
   std::string error;  // last scan error
   time_t scanned = 0;  // when the scan finished
   // Games tab: every game's folders on every volume, counted on their own thread.
   std::unique_ptr<GameScanner> game_scanner;
   std::vector<GameTotal> games;
   bool games_ready = false;
+  // Playden's games and their PS5 titles, read when the games are counted.
+  PlaydenTitles playden;
   // Report export: scans the chosen drives one by one, then builds the page.
   struct ReportJob {
     std::vector<Storage> scope;       // the drives, in report order
@@ -106,10 +112,26 @@ std::string JoinPath(const std::string& base, const std::string& name) {
 
 // A folder named after a title ID: the game's name, and whether it has an icon.
 void GameFields(std::ostringstream& o, Node* n, const std::string& path) {
-  if (!n->isDir || !IsTitleId(n->name)) return;
+  if (!n->isDir) return;
+  if (!IsTitleId(n->name)) {
+    // A Playden game's files or bottle, named by its store ID ("2610").
+    PlaydenFolder pf = PlaydenFolderOf(path, g.playden);
+    GameInfo gi = pf.title.empty() ? GameInfo{} : LookupGame(pf.title, "");
+    if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
+    return;
+  }
   GameInfo gi = LookupGame(n->name, path);
   if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
   if (!gi.icon.empty()) o << ",\"icon\":true";
+}
+
+// The title deleting `path` uninstalls, so the UI can tell which other
+// warnings that uninstall makes moot.
+void UninstallField(std::ostringstream& o, const std::string& path) {
+  std::string id = PlanDelete(path, g.playden).uninstall;
+  if (!id.empty()) o << ",\"uninstall\":" << Str(id);
+  std::string with = RemovedWithTitle(path);
+  if (!with.empty()) o << ",\"removedWith\":" << Str(with);
 }
 
 // Fields shared by list rows and biggest files.
@@ -120,6 +142,7 @@ void ItemFields(std::ostringstream& o, Node* n, const std::string& path) {
     << ",\"protected\":" << Bool(n->isMount || IsProtected(path));
   std::string w = DeleteWarning(path);
   if (!w.empty()) o << ",\"warn\":" << Str(w);
+  UninstallField(o, path);
   GameFields(o, n, path);
 }
 
@@ -361,12 +384,24 @@ std::string GamesJson() {
       if (n && n->parent) o << ",\"node\":" << n->id << ",\"parent\":" << n->parent->id;
       std::string w = DeleteWarning(part.path);
       if (!w.empty()) o << ",\"warn\":" << Str(w);
+      UninstallField(o, part.path);
       o << "}";
     }
     o << "]}";
   }
   o << "]}";
   return o.str();
+}
+
+// What the uninstall of a plan's title frees, as far as the scan and the game
+// count know.
+uint64_t SystemBytes(const DeletePlan& plan) {
+  uint64_t bytes = 0;
+  for (const std::string& p : plan.system_removes) {
+    if (Node* n = FindNode(g.root, p)) bytes += n->size;
+    else if (const GamePart* part = FindGamePart(p)) bytes += part->size;
+  }
+  return bytes;
 }
 
 // ---------------------------------------------------------------- transitions (locked)
@@ -389,8 +424,17 @@ void StartGamesLocked() {
   // System folders keep their own per-title files (share, licenses).
   for (const char* p : {"/user/system", "/user/license", "/user/settings"}) skip.push_back(p);
 #endif
+  // Playden's games are folders named by store ID: counted with their PS5 title.
+  g.playden = ReadPlaydenTitles(Console().homebrew);
+  std::map<std::string, GameFolder> named;
+  for (const auto& kv : g.playden) {
+    const std::string& install = kv.first;
+    std::string folder = install.compare(0, 6, "steam-") == 0 ? install.substr(6) : install;
+    for (const std::string& games : Console().playden_games) named[games + "/" + folder] = {kv.second, "Game"};
+    if (!Console().playden_bottles.empty()) named[Console().playden_bottles + "/" + install] = {kv.second, "Saves"};
+  }
   g.game_scanner = std::make_unique<GameScanner>();
-  g.game_scanner->Start(roots, skip);
+  g.game_scanner->Start(roots, skip, named);
 }
 
 void FinishScanLocked() {
@@ -447,6 +491,8 @@ void FinishDeleteLocked() {
   g.result_errors = g.deleter->Errors();
   g.result_total = results.size();
   g.result_removed = 0;
+  g.result_notes = g.deleter->Notes();
+  std::vector<std::string> touched = g.deleter->Touched();
   g.deleter.reset();
   for (auto& res : results) {
     Node* n = res.node;
@@ -461,6 +507,15 @@ void FinishDeleteLocked() {
       continue;
     }
     RescanLocked(n);  // partly deleted
+  }
+  // What the uninstalls removed besides the selection (updates, add-ons).
+  for (const std::string& p : touched) {
+    Node* n = FindNode(g.root, p);
+    struct stat st;
+    if (n && n->parent && lstat(p.c_str(), &st) != 0 && errno == ENOENT) {
+      g.index.Remove(n);
+      DetachAndFree(n);
+    }
   }
   g.biggest = BiggestFiles(g.root, 500);
   g.result_op = "delete";
@@ -478,6 +533,7 @@ void FinishMoveLocked() {
   g.result_errors = g.mover->Errors();
   g.result_total = results.size();
   g.result_removed = 0;
+  g.result_notes.clear();
   g.mover.reset();
   for (auto& res : results) {
     Node* n = res.node;
@@ -700,7 +756,9 @@ void ApiHandle(const Request& req, Response& res) {
         << ",\"dest\":" << Str(g.move_dest) << ",\"current\":" << Str(g.mover->CurrentPath());
     o << ",\"result\":{\"op\":" << Str(g.result_op) << ",\"seq\":" << g.result_seq << ",\"freed\":" << g.result_freed
       << ",\"errors\":" << g.result_errors << ",\"removed\":" << g.result_removed
-      << ",\"total\":" << g.result_total << "}}";
+      << ",\"total\":" << g.result_total << ",\"notes\":[";
+    for (size_t i = 0; i < g.result_notes.size(); i++) o << (i ? "," : "") << Str(g.result_notes[i]);
+    o << "]}}";
     Json(res, 200, o.str());
   } else if (p == "/api/scan" && req.method == "POST") {
     if (g.phase == Phase::Scanning || g.phase == Phase::Deleting || g.phase == Phase::Moving || ReportBusy()) {
@@ -758,13 +816,34 @@ void ApiHandle(const Request& req, Response& res) {
       Error(res, 400, "nothing deletable selected");
       return;
     }
+    // Titles are uninstalled first, so their other folders go with them.
+    std::vector<std::pair<PathTarget, DeletePlan>> planned;
+    for (const PathTarget& t : top) {
+      DeletePlan plan = PlanDelete(t.path, g.playden);
+      if (!plan.refuse.empty()) {
+        Error(res, 400, plan.refuse);
+        return;
+      }
+      plan.system_bytes = SystemBytes(plan);
+      planned.push_back({t, plan});
+    }
+    std::stable_sort(planned.begin(), planned.end(), [](const auto& a, const auto& b) {
+      return !a.second.uninstall.empty() && b.second.uninstall.empty();
+    });
+    std::vector<DeletePlan> plans;
+    top.clear();
     g.delete_bytes = 0;
-    for (const auto& t : top) {
-      g.delete_bytes += t.size;
-      Log("delete: %s", t.path.c_str());
+    for (const auto& tp : planned) {
+      top.push_back(tp.first);
+      plans.push_back(tp.second);
+      const auto& sys = tp.second.system_removes;
+      bool own = std::find(sys.begin(), sys.end(), tp.first.path) != sys.end();
+      g.delete_bytes += own ? std::max(tp.first.size, tp.second.system_bytes) : tp.first.size + tp.second.system_bytes;
+      Log("delete: %s%s%s", tp.first.path.c_str(), tp.second.uninstall.empty() ? "" : " (uninstall ",
+          tp.second.uninstall.empty() ? "" : (tp.second.uninstall + ")").c_str());
     }
     g.deleter = std::make_unique<Deleter>();
-    g.deleter->Start(top);
+    g.deleter->Start(top, plans);
     g.phase = Phase::Deleting;
     Json(res, 200, "{\"ok\":true,\"count\":" + Num(top.size()) + "}");
   } else if (p == "/api/move" && req.method == "POST") {
@@ -782,6 +861,11 @@ void ApiHandle(const Request& req, Response& res) {
     // Leave out what is already there, and never a folder into itself.
     std::vector<PathTarget> top;
     for (const PathTarget& t : SelectedLocked(req, true)) {
+      DeletePlan plan = PlanDelete(t.path, g.playden);
+      if (!plan.refuse.empty() || !plan.uninstall.empty() || !plan.playden_forget.empty()) {
+        Error(res, 400, "Installed games can't be moved: the console (or Playden) would lose track of them");
+        return;
+      }
       if (dest == t.path || IsInside(dest, t.path)) {
         Error(res, 400, "A folder cannot be moved into itself");
         return;
