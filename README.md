@@ -3,7 +3,7 @@
 **Running out of space on your PS5? Find out where it went.**
 
 Your PS5 says the drive is full, but what is actually filling it? Disk Space
-Analyzer scans your storage and shows you, right on your TV, which games and
+Analyzer scans your storage and shows you, which games and
 folders take the most space. Then you pick what to remove and get that space back.
 
 ![Choose a storage to scan](docs/screenshots/home.png)
