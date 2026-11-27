@@ -96,7 +96,7 @@ bool IsProtected(const std::string& p) {
   // Volume roots and the top folders of the user partition.
   static const char* exact[] = {"/user/home", "/user/app", "/user/patch", "/user/appmeta",
                                 "/user/addcont", "/user/av_contents", "/user/data",
-                                "/data/homebrew", "/mnt/ext0", "/mnt/ext1"};
+                                "/data/homebrew", "/user/data/homebrew", "/mnt/ext0", "/mnt/ext1"};
   for (const char* e : exact)
     if (p == e) return true;
   if (p.compare(0, 8, "/mnt/usb") == 0 && p.find('/', 8) == std::string::npos) return true;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "games.h"
 
+#include <dirent.h>
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <cstdio>
 #include <map>
 #include <mutex>
+#include <vector>
 
 namespace {
 
@@ -202,4 +204,184 @@ GameInfo LookupGame(const std::string& id, const std::string& folder) {
 void ClearGameCache() {
   std::lock_guard<std::mutex> lock(g_mu);
   g_cache.clear();
+}
+
+// ---------------------------------------------------------------- game data
+
+namespace {
+
+// How deep below a volume root a title ID folder can sit:
+// /user/av_contents/photo/NPXS40087/<ID> is the deepest known.
+const int kMaxDepth = 5;
+
+uint64_t DiskBytes(const struct stat& st) {
+  uint64_t alloc = (uint64_t)st.st_blocks * 512u;
+  return alloc ? alloc : (uint64_t)st.st_size;
+}
+
+std::vector<std::string> Segments(const std::string& path) {
+  std::vector<std::string> out;
+  size_t pos = 0;
+  while (pos <= path.size()) {
+    size_t s = path.find('/', pos);
+    if (s == std::string::npos) s = path.size();
+    if (s > pos) out.push_back(path.substr(pos, s - pos));
+    pos = s + 1;
+  }
+  return out;
+}
+
+// System apps (NPXS40087 holds every capture) and trophy sets are not games.
+bool IsGamePrefix(const std::string& s, size_t i) {
+  return s.compare(i, 4, "NPXS") != 0 && s.compare(i, 4, "NPWR") != 0;
+}
+bool IsGameId(const std::string& name) { return IsTitleId(name) && IsGamePrefix(name, 0); }
+
+bool IsUpper(char c) { return c >= 'A' && c <= 'Z'; }
+bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+bool IsAlnum(char c) { return IsUpper(c) || IsDigit(c) || (c >= 'a' && c <= 'z'); }
+
+// A title ID inside a longer name, as game dumps are named:
+// "PPSA02100-app", "Indiana Jones [PPSA26786]", "PPSA05496 [PS5] LEGO ... .exfat".
+std::string EmbeddedGameId(const std::string& n) {
+  for (size_t i = 0; i + 9 <= n.size(); i++) {
+    if (i > 0 && IsAlnum(n[i - 1])) continue;
+    if (i + 9 < n.size() && IsAlnum(n[i + 9])) continue;
+    std::string id = n.substr(i, 9);
+    if (IsGameId(id)) return id;
+  }
+  return "";
+}
+
+}  // namespace
+
+std::string GameCategory(const std::string& path) {
+  std::vector<std::string> seg = Segments(path);
+  if (seg.size() < 2) return "Other";
+  const std::string& parent = seg[seg.size() - 2];
+  for (size_t i = 0; i + 1 < seg.size(); i++) {
+    if (seg[i] == "av_contents") return "Captures";
+    if (seg[i].compare(0, 8, "savedata") == 0 || seg[i] == "np_cloud_save") return "Saves";
+    if (seg[i] == "appmeta") return "Metadata";
+  }
+  if (parent == "app") return "Game";
+  if (parent == "patch") return "Update";
+  if (parent == "addcont") return "Add-ons";
+  if (parent == "homebrew") return "Game dump";
+  if (parent == "download") return "Downloads";
+  return "Other";
+}
+
+GameScanner::~GameScanner() {
+  Cancel();
+  if (started_) pthread_join(thread_, nullptr);
+}
+
+void GameScanner::Start(const std::vector<GameRoot>& roots, const std::vector<std::string>& skip) {
+  roots_ = roots;
+  skip_ = skip;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+  started_ = pthread_create(&thread_, &attr, ThreadMain, this) == 0;
+  pthread_attr_destroy(&attr);
+  if (!started_) ThreadMain(this);
+}
+
+std::vector<GameTotal> GameScanner::Take() { return std::move(result_); }
+
+void* GameScanner::ThreadMain(void* p) {
+  auto* self = static_cast<GameScanner*>(p);
+  for (const GameRoot& r : self->roots_) {
+    struct stat st;
+    if (lstat(r.path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) self->Find(r.path, r, 0, (uint64_t)st.st_dev);
+  }
+  std::map<std::string, GameTotal> by_id;
+  for (auto& f : self->found_) {
+    GameTotal& g = by_id[f.first];
+    g.id = f.first;
+    g.size += f.second.size;
+    g.files += f.second.files;
+    g.parts.push_back(std::move(f.second));
+  }
+  self->found_.clear();
+  for (auto& kv : by_id) {
+    GameTotal& g = kv.second;
+    // Leftover home screen data of a game that is gone is not worth a row.
+    bool only_meta = std::all_of(g.parts.begin(), g.parts.end(),
+                                 [](const GamePart& p) { return p.category == "Metadata"; });
+    if (only_meta) continue;
+    std::sort(g.parts.begin(), g.parts.end(),
+              [](const GamePart& a, const GamePart& b) { return a.size > b.size; });
+    self->result_.push_back(std::move(g));
+  }
+  std::sort(self->result_.begin(), self->result_.end(), [](const GameTotal& a, const GameTotal& b) {
+    return a.size != b.size ? a.size > b.size : a.id < b.id;
+  });
+  self->done_ = true;
+  return nullptr;
+}
+
+void GameScanner::Find(const std::string& dir, const GameRoot& root, int depth, uint64_t dev) {
+  DIR* d = opendir(dir.c_str());
+  if (!d) return;
+  std::vector<std::string> subdirs;
+  while (struct dirent* e = readdir(d)) {
+    const char* nm = e->d_name;
+    if (nm[0] == '.' && (nm[1] == 0 || (nm[1] == '.' && nm[2] == 0))) continue;
+    if (e->d_type == DT_DIR || e->d_type == DT_UNKNOWN || e->d_type == DT_REG) subdirs.push_back(nm);
+  }
+  closedir(d);
+  for (const std::string& nm : subdirs) {
+    if (cancel_) return;
+    std::string path = dir.back() == '/' ? dir + nm : dir + "/" + nm;
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0 || (uint64_t)st.st_dev != dev) continue;
+    bool dir = S_ISDIR(st.st_mode);
+    if (!dir && !S_ISREG(st.st_mode)) continue;
+    if (std::find(skip_.begin(), skip_.end(), path) != skip_.end()) continue;
+    // A folder named after the game, or a dump (folder or disk image) with
+    // the title ID in its name.
+    std::string id = dir && IsGameId(nm) ? nm : EmbeddedGameId(nm);
+    if (!id.empty()) {
+      GamePart part;
+      part.category = id == nm ? GameCategory(path)
+                      : path.find("/playgo/") != std::string::npos ? "Install data"  // EP9000-CUSA00207_00-...
+                      : "Game dump";
+      part.path = path;
+      part.volume = root.volume;
+      part.size = DiskBytes(st);
+      if (dir) Measure(path, dev, &part);
+      else part.files = 1;
+      found_.emplace_back(id, std::move(part));
+    } else if (dir && depth + 1 < kMaxDepth) {
+      Find(path, root, depth + 1, dev);
+    }
+  }
+}
+
+void GameScanner::Measure(const std::string& path, uint64_t dev, GamePart* part) {
+  DIR* d = opendir(path.c_str());
+  if (!d) {
+    part->error = true;
+    return;
+  }
+  while (struct dirent* e = readdir(d)) {
+    if (cancel_) break;
+    const char* nm = e->d_name;
+    if (nm[0] == '.' && (nm[1] == 0 || (nm[1] == '.' && nm[2] == 0))) continue;
+    std::string child = path + "/" + nm;
+    struct stat st;
+    if (lstat(child.c_str(), &st) != 0) {
+      part->error = true;
+      continue;
+    }
+    part->size += DiskBytes(st);
+    if (S_ISDIR(st.st_mode)) {
+      if ((uint64_t)st.st_dev == dev) Measure(child, dev, part);
+    } else {
+      part->files++;
+    }
+  }
+  closedir(d);
 }

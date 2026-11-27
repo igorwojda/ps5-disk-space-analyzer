@@ -83,12 +83,16 @@ class Scanner {
 // Deletes a list of paths on its own thread. Never touches the tree.
 class Deleter {
  public:
+  struct Target {
+    std::string path;
+    Node* node;  // its node in the scanned tree, or null (another volume)
+  };
   struct Result {
     Node* node;
     bool gone;  // path no longer exists
   };
   ~Deleter();
-  void Start(const std::vector<Node*>& targets);
+  void Start(const std::vector<Target>& targets);
   bool Done() const { return done_.load(); }
   int Index() const { return index_.load(); }
   size_t Total() const { return paths_.size(); }

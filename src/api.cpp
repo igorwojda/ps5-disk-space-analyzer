@@ -35,6 +35,10 @@ struct State {
   int result_seq = 0;
   uint64_t result_freed = 0, result_errors = 0, result_removed = 0, result_total = 0;
   std::string error;  // last scan error
+  // Games tab: every game's folders on every volume, counted on their own thread.
+  std::unique_ptr<GameScanner> game_scanner;
+  std::vector<GameTotal> games;
+  bool games_ready = false;
 };
 
 State g;
@@ -179,7 +183,89 @@ std::string BiggestJson() {
   return o.str();
 }
 
+// The node for `path` in the scanned tree, or null when it is not in it.
+Node* FindNode(Node* root, const std::string& path) {
+  if (!root) return nullptr;
+  const std::string& rp = root->name;
+  std::string rest;
+  if (path == rp) return root;
+  if (rp == "/") rest = path.substr(1);
+  else if (path.compare(0, rp.size(), rp) == 0 && path.size() > rp.size() && path[rp.size()] == '/')
+    rest = path.substr(rp.size() + 1);
+  else return nullptr;
+  Node* n = root;
+  size_t pos = 0;
+  while (n && pos < rest.size()) {
+    size_t s = rest.find('/', pos);
+    if (s == std::string::npos) s = rest.size();
+    std::string name = rest.substr(pos, s - pos);
+    Node* next = nullptr;
+    for (Node* c : n->children)
+      if (c->name == name) next = c;
+    n = next;
+    pos = s + 1;
+  }
+  return n;
+}
+
+const GamePart* FindGamePart(const std::string& path) {
+  for (const GameTotal& gt : g.games)
+    for (const GamePart& part : gt.parts)
+      if (part.path == path) return &part;
+  return nullptr;
+}
+
+std::string GamesJson() {
+  std::ostringstream o;
+  o << "{\"state\":\"" << (g.game_scanner ? "counting" : g.games_ready ? "ready" : "idle") << "\",\"games\":[";
+  for (size_t i = 0; i < g.games.size(); i++) {
+    const GameTotal& gt = g.games[i];
+    GameInfo gi = LookupGame(gt.id, gt.parts.empty() ? "" : gt.parts[0].path);
+    o << (i ? "," : "") << "{\"id\":" << Str(gt.id) << ",\"size\":" << gt.size << ",\"files\":" << gt.files;
+    if (!gi.title.empty()) o << ",\"title\":" << Str(gi.title);
+    if (!gi.icon.empty()) o << ",\"icon\":true";
+    o << ",\"parts\":[";
+    for (size_t k = 0; k < gt.parts.size(); k++) {
+      const GamePart& part = gt.parts[k];
+      Node* n = FindNode(g.root, part.path);
+      o << (k ? "," : "") << "{\"cat\":" << Str(part.category) << ",\"path\":" << Str(part.path)
+        << ",\"volume\":" << Str(part.volume) << ",\"size\":" << part.size << ",\"files\":" << part.files
+        << ",\"error\":" << Bool(part.error) << ",\"protected\":" << Bool(IsProtected(part.path));
+      // In the scanned tree: the Folders tab can show it.
+      if (n && n->parent) o << ",\"node\":" << n->id << ",\"parent\":" << n->parent->id;
+      std::string w = DeleteWarning(part.path);
+      if (!w.empty()) o << ",\"warn\":" << Str(w);
+      o << "}";
+    }
+    o << "]}";
+  }
+  o << "]}";
+  return o.str();
+}
+
 // ---------------------------------------------------------------- transitions (locked)
+
+// Count every game's data again, on all volumes (not just the scanned one).
+void StartGamesLocked() {
+  g.game_scanner.reset();  // cancels and waits for a running one
+  std::vector<GameRoot> roots;
+  for (const Storage& st : ListStorages(g_extra)) {
+#if defined(__PROSPERO__)
+    if (st.kind == "system") continue;
+#else
+    // On a computer only the folders given on the command line (test data).
+    if (std::find(g_extra.begin(), g_extra.end(), st.path) == g_extra.end()) continue;
+#endif
+    roots.push_back({st.path, st.name});
+  }
+  std::vector<std::string> skip = SkipList();
+#if defined(__PROSPERO__)
+  // System folders keep their own per-title files (share, licenses).
+  for (const char* p : {"/user/system", "/user/license", "/user/settings"}) skip.push_back(p);
+#endif
+  g.game_scanner = std::make_unique<GameScanner>();
+  g.game_scanner->Start(roots, skip);
+}
 
 void FinishScanLocked() {
   bool cancelled = g.scanner->Cancelled();
@@ -211,6 +297,10 @@ void FinishDeleteLocked() {
   g.deleter.reset();
   for (auto& res : results) {
     Node* n = res.node;
+    if (!n) {  // on another volume: not in the tree
+      if (res.gone) g.result_removed++;
+      continue;
+    }
     if (res.gone && n->parent) {
       g.index.Remove(n);
       DetachAndFree(n);
@@ -245,6 +335,7 @@ void FinishDeleteLocked() {
   g.result_seq++;
   g.phase = Phase::Ready;
   QuerySpace(g.storage.path, &g.storage.total, &g.storage.free);
+  StartGamesLocked();
   Log("delete done: freed %llu bytes, %llu errors", (unsigned long long)g.result_freed,
       (unsigned long long)g.result_errors);
 }
@@ -252,6 +343,12 @@ void FinishDeleteLocked() {
 void PollLocked() {
   if (g.phase == Phase::Scanning && g.scanner && g.scanner->Done()) FinishScanLocked();
   if (g.phase == Phase::Deleting && g.deleter && g.deleter->Done()) FinishDeleteLocked();
+  if (g.game_scanner && g.game_scanner->Done()) {
+    g.games = g.game_scanner->Take();
+    g.game_scanner.reset();
+    g.games_ready = true;
+    Log("games counted: %zu", g.games.size());
+  }
 }
 
 const char* PhaseName(Phase p) {
@@ -388,6 +485,7 @@ void ApiHandle(const Request& req, Response& res) {
     g.scanner = std::make_unique<Scanner>();
     g.scanner->Start(s.path, SkipList());
     g.phase = Phase::Scanning;
+    StartGamesLocked();
     Log("scan start: %s", s.path.c_str());
     Json(res, 200, "{\"ok\":true}");
   } else if (p == "/api/cancel" && req.method == "POST") {
@@ -407,12 +505,15 @@ void ApiHandle(const Request& req, Response& res) {
     Json(res, 200, NodeJson(n));
   } else if (p == "/api/biggest") {
     Json(res, 200, g.root ? BiggestJson() : "[]");
+  } else if (p == "/api/games") {
+    Json(res, 200, GamesJson());
   } else if (p == "/api/delete" && req.method == "POST") {
     if (g.phase != Phase::Ready) {
       Error(res, 409, "busy");
       return;
     }
-    std::vector<Node*> targets;
+    // Nodes of the scanned tree by id, and game folders (any volume) by path.
+    std::vector<std::string> paths;
     auto it = req.query.find("ids");
     std::string ids = it == req.query.end() ? "" : it->second;
     size_t pos = 0;
@@ -422,24 +523,39 @@ void ApiHandle(const Request& req, Response& res) {
       Node* n = g.index.Get((uint32_t)std::strtoul(ids.substr(pos, c - pos).c_str(), nullptr, 10));
       pos = c + 1;
       if (!n || !n->parent || n->isMount || IsProtected(n->path())) continue;  // never the root
-      targets.push_back(n);
+      paths.push_back(n->path());
+    }
+    it = req.query.find("paths");
+    std::string plist = it == req.query.end() ? "" : it->second;
+    pos = 0;
+    while (pos < plist.size()) {
+      size_t c = plist.find('\n', pos);
+      if (c == std::string::npos) c = plist.size();
+      std::string path = plist.substr(pos, c - pos);
+      pos = c + 1;
+      // Only folders the game count found, never an arbitrary path.
+      if (FindGamePart(path) && !IsProtected(path)) paths.push_back(path);
     }
     // A selected folder already covers anything selected inside it.
-    std::vector<Node*> top;
-    for (Node* n : targets) {
+    std::vector<Deleter::Target> top;
+    for (const std::string& path : paths) {
       bool covered = false;
-      for (Node* m : targets)
-        if (m != n && m->isAncestorOf(n)) covered = true;
-      if (!covered && std::find(top.begin(), top.end(), n) == top.end()) top.push_back(n);
+      for (const std::string& q : paths)
+        if (q != path && path.compare(0, q.size(), q) == 0 && path.size() > q.size() && path[q.size()] == '/')
+          covered = true;
+      bool dup = false;
+      for (const auto& t : top) dup = dup || t.path == path;
+      if (!covered && !dup) top.push_back({path, FindNode(g.root, path)});
     }
     if (top.empty()) {
       Error(res, 400, "nothing deletable selected");
       return;
     }
     g.delete_bytes = 0;
-    for (Node* n : top) {
-      g.delete_bytes += n->size;
-      Log("delete: %s", n->path().c_str());
+    for (const auto& t : top) {
+      if (t.node) g.delete_bytes += t.node->size;
+      else if (const GamePart* part = FindGamePart(t.path)) g.delete_bytes += part->size;
+      Log("delete: %s", t.path.c_str());
     }
     g.deleter = std::make_unique<Deleter>();
     g.deleter->Start(top);

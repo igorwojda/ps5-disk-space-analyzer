@@ -14,6 +14,12 @@ version and the address to open (`http://<ps5-ip>:8833/`).
 - Folder list sorted by size next to a sunburst chart (4 levels deep). The
   focused item lights up in the chart.
 - **Biggest Files** tab: the 500 largest files.
+- **Games** tab: one row per game with everything it owns on every
+  volume added up: game data, updates, add-ons, saves, captures (screenshots
+  and clips), pending downloads, home screen data, and game dumps whose name
+  holds the title ID (`PPSA02100-app`, `Game [PPSA26786]`, `PPSA05496 ... .exfat`). Open a game to see each folder; select a
+  game to select all of its folders (saves included: unselect them on the
+  review screen to keep them).
 - Game folders (`PPSA01325`, `CUSA00207`, ...) show the game's name and icon,
   read from the console's own game metadata.
 - Select files and folders, check the review screen (space you get back, free
@@ -102,9 +108,10 @@ make run                                   # http://localhost:8833/, UI served f
 | --- | --- |
 | `src/main.cpp` | Payload start: single instance, port, tile, toast |
 | `src/http.*` | Minimal HTTP server (thread per connection) |
-| `src/api.*` | JSON API: version/address, storages, scan, folders, biggest files, delete |
+| `src/api.*` | JSON API: version/address, storages, scan, folders, biggest files, games, delete |
 | `src/tree.*` | File tree, background scanner, background deleter |
 | `src/platform.*` | Storage list, free space, protected paths, warnings |
+| `src/games.*` | Game names and icons; finds and adds up each game's folders on all volumes |
 | `src/launcher.*` | Media tile (`/user/app/DSAN00002`, category 65536, `deeplinkUri`) |
 | `src/system.*` | Log file and PS5 notifications |
 | `web/` | The UI: `index.html`, `app.css`, `app.js` (compiled into the ELF) |

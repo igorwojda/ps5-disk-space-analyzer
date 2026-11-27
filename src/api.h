@@ -8,7 +8,9 @@
 //   GET  /api/status              phase, progress, last delete result
 //   GET  /api/node?id=N           folder N: children (all) + rings for the chart
 //   GET  /api/biggest             biggest files of the scan
-//   POST /api/delete?ids=1,2,3    delete these nodes (protected ones are refused)
+//   GET  /api/games               every game's folders on every volume, added up
+//   POST /api/delete?ids=1,2,3    delete these nodes (protected ones are refused);
+//                                 paths=a\nb deletes game folders found by /api/games
 //   POST /api/quit                stop the payload
 #pragma once
 

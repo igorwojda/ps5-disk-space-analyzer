@@ -223,9 +223,11 @@ Deleter::~Deleter() {
   if (started_) pthread_join(thread_, nullptr);
 }
 
-void Deleter::Start(const std::vector<Node*>& targets) {
-  targets_ = targets;
-  for (Node* n : targets) paths_.push_back(n->path());
+void Deleter::Start(const std::vector<Target>& targets) {
+  for (const Target& t : targets) {
+    targets_.push_back(t.node);
+    paths_.push_back(t.path);
+  }
   started_ = StartThread(&thread_, ThreadMain, this);
   if (!started_) ThreadMain(this);
 }
