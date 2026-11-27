@@ -97,7 +97,8 @@ class Deleter {
   using Target = PathTarget;
   struct Result {
     Node* node;
-    bool gone;  // path no longer exists
+    bool gone;              // path no longer exists
+    Node* fresh = nullptr;  // a new scan of it when node is set and it is not gone; caller owns
   };
   ~Deleter();
   // plans: one per target (PlanDelete's), or none for plain deletes.
@@ -144,10 +145,13 @@ class Mover {
   using Target = PathTarget;
   struct Result {
     Node* node;
-    bool gone;  // source path no longer exists
+    bool gone;              // source path no longer exists
+    Node* fresh = nullptr;  // a new scan of it when node is set and it is not gone; caller owns
   };
   ~Mover();
-  void Start(const std::vector<Target>& targets, const std::string& dest);
+  // scan_dest: scan the destination once done too (it is in the scanned tree).
+  void Start(const std::vector<Target>& targets, const std::string& dest, bool scan_dest);
+  Node* TakeDestScan();  // valid once Done(): caller owns; null without scan_dest
   bool Done() const { return done_.load(); }
   int Index() const { return index_.load(); }
   size_t Total() const { return targets_.size(); }
@@ -166,6 +170,8 @@ class Mover {
   std::mutex mutex_;
   std::vector<Target> targets_;
   std::string dest_;
+  bool scan_dest_ = false;
+  Node* dest_scan_ = nullptr;
   std::vector<Result> results_;
   std::string current_;
   std::atomic<bool> done_{false};

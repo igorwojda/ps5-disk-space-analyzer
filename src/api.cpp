@@ -486,9 +486,12 @@ void FinishScanLocked() {
   Log("scan done: %llu items, %llu bytes", (unsigned long long)items, (unsigned long long)r->size);
 }
 
-// Scan `n` again after files in it changed, and fix the sizes above it.
-void RescanLocked(Node* n) {
-  Node* fresh = Scanner::ScanSync(n->path());
+// Put `fresh`, a new scan of `n`'s path made after files in it changed, in
+// place of n's contents and fix the sizes above it. Takes fresh. The scan is
+// made by the deleter or mover on its own thread: a big folder takes long, and
+// every request waits while the tree is locked.
+void ReplaceLocked(Node* n, Node* fresh) {
+  if (!fresh) return;
   int64_t dsize = (int64_t)fresh->size - (int64_t)n->size;
   int64_t dfiles = (int64_t)fresh->files - (int64_t)n->files;
   for (Node* c : n->children) {
@@ -533,7 +536,7 @@ void FinishDeleteLocked() {
       g.result_removed++;
       continue;
     }
-    RescanLocked(n);  // partly deleted
+    ReplaceLocked(n, res.fresh);  // partly deleted
   }
   // What the uninstalls removed besides the selection (updates, add-ons).
   for (const std::string& p : touched) {
@@ -561,6 +564,7 @@ void FinishMoveLocked() {
   g.result_total = results.size();
   g.result_removed = 0;
   g.result_notes.clear();
+  Node* dest_scan = g.mover->TakeDestScan();
   g.mover.reset();
   for (auto& res : results) {
     Node* n = res.node;
@@ -570,11 +574,12 @@ void FinishMoveLocked() {
       g.index.Remove(n);
       DetachAndFree(n);
     } else {
-      RescanLocked(n);  // partly moved
+      ReplaceLocked(n, res.fresh);  // partly moved
     }
   }
   // The folder the items went to, when it is part of this scan.
-  if (Node* d = FindNode(g.root, g.move_dest)) RescanLocked(d);
+  if (Node* d = FindNode(g.root, g.move_dest)) ReplaceLocked(d, dest_scan);
+  else delete dest_scan;
   g.biggest = BiggestFiles(g.root, 500);
   g.result_op = "move";
   g.result_seq++;
@@ -956,7 +961,7 @@ void ApiHandle(const Request& req, Response& res) {
     }
     g.move_dest = dest;
     g.mover = std::make_unique<Mover>();
-    g.mover->Start(top, dest);
+    g.mover->Start(top, dest, FindNode(g.root, dest) != nullptr);
     g.phase = Phase::Moving;
     Json(res, 200, "{\"ok\":true,\"count\":" + Num(top.size()) + "}");
   } else if (p == "/api/report/targets") {

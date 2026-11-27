@@ -281,7 +281,9 @@ void* Deleter::ThreadMain(void* p) {
     if (gone && !plan.playden_forget.empty() && !AskPlaydenToForget(plan.playden_forget))
       self->notes_.push_back("Playden could not be told about game " + plan.playden_forget +
                              ": uninstall it in Playden too.");
-    self->results_.push_back({self->targets_[i], gone});
+    // Partly deleted: scan what is left here, not while the tree is locked.
+    Node* fresh = !gone && self->targets_[i] ? Scanner::ScanSync(path) : nullptr;
+    self->results_.push_back({self->targets_[i], gone, fresh});
   }
   self->done_ = true;
   return nullptr;
@@ -343,11 +345,19 @@ bool RemoveTree(const std::string& path) {
 
 Mover::~Mover() {
   if (started_) pthread_join(thread_, nullptr);
+  delete dest_scan_;
 }
 
-void Mover::Start(const std::vector<Target>& targets, const std::string& dest) {
+Node* Mover::TakeDestScan() {
+  Node* n = dest_scan_;
+  dest_scan_ = nullptr;
+  return n;
+}
+
+void Mover::Start(const std::vector<Target>& targets, const std::string& dest, bool scan_dest) {
   targets_ = targets;
   dest_ = dest;
+  scan_dest_ = scan_dest;
   started_ = StartThread(&thread_, ThreadMain, this);
   if (!started_) ThreadMain(this);
 }
@@ -393,7 +403,13 @@ void* Mover::ThreadMain(void* p) {
       self->errors_++;
     }
     bool gone = lstat(t.path.c_str(), &st) != 0 && errno == ENOENT;
-    self->results_.push_back({t.node, gone});
+    // Partly moved: scan what is left here, not while the tree is locked.
+    Node* fresh = !gone && t.node ? Scanner::ScanSync(t.path) : nullptr;
+    self->results_.push_back({t.node, gone, fresh});
+  }
+  if (self->scan_dest_) {
+    self->SetCurrent(self->dest_);
+    self->dest_scan_ = Scanner::ScanSync(self->dest_);
   }
   self->done_ = true;
   return nullptr;
