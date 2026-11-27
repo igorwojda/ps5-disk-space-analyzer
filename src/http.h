@@ -11,6 +11,7 @@ struct Request {
   std::string method;
   std::string path;                          // without the query string
   std::map<std::string, std::string> query;  // decoded
+  std::map<std::string, std::string> headers;  // names in lower case
   std::string body;
   std::string local_ip;  // our address on the connection the request came in on
 };

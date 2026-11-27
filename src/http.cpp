@@ -118,6 +118,7 @@ static const char* Reason(int s) {
   switch (s) {
     case 200: return "OK";
     case 400: return "Bad Request";
+    case 403: return "Forbidden";
     case 404: return "Not Found";
     case 409: return "Conflict";
     case 413: return "Payload Too Large";
@@ -170,6 +171,16 @@ static void* Connection(void* arg) {
     size_t content_length = 0;
     std::string lower = head;
     for (auto& c : lower) c = (char)tolower((unsigned char)c);
+    for (size_t at = head.find("\r\n"); at != std::string::npos;) {
+      size_t start = at + 2, end = head.find("\r\n", start);
+      size_t colon = head.find(':', start);
+      if (colon != std::string::npos && colon < (end == std::string::npos ? head.size() : end)) {
+        size_t v = head.find_first_not_of(" \t", colon + 1);
+        size_t vend = end == std::string::npos ? head.size() : end;
+        req.headers[lower.substr(start, colon - start)] = v == std::string::npos || v >= vend ? "" : head.substr(v, vend - v);
+      }
+      at = end;
+    }
     size_t cl = lower.find("\r\ncontent-length:");
     if (cl != std::string::npos) content_length = (size_t)std::strtoul(lower.c_str() + cl + 17, nullptr, 10);
     if (content_length > 1 << 20) {
@@ -194,8 +205,7 @@ static void* Connection(void* arg) {
                 "HTTP/1.1 %d %s\r\n"
                 "Content-Type: %s\r\n"
                 "Content-Length: %zu\r\n"
-                "Cache-Control: %s\r\n"
-                "Access-Control-Allow-Origin: *\r\n",
+                "Cache-Control: %s\r\n",
                 res.status, Reason(res.status), res.type.c_str(), size, res.cache.c_str());
   std::string head_out = header + res.headers + "Connection: close\r\n\r\n";
   if (SendAll(fd, head_out.data(), head_out.size()) && req.method != "HEAD") SendAll(fd, data, size);

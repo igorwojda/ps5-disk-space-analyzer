@@ -46,8 +46,9 @@ const fmtCount = (n) => Number(n).toLocaleString('en-US');
 const fmtPct = (f) => (f >= 0.1 ? (f * 100).toFixed(0) : (f * 100).toFixed(1)) + '%';
 
 async function api(path, method = 'GET', body) {
-  const opt = { method, cache: 'no-store' };
-  if (body != null) { opt.body = body; opt.headers = { 'Content-Type': 'application/x-www-form-urlencoded' }; }
+  // X-DSA: the server takes changes only with it, which other sites' pages cannot send.
+  const opt = { method, cache: 'no-store', headers: method === 'GET' ? {} : { 'X-DSA': '1' } };
+  if (body != null) { opt.body = body; opt.headers['Content-Type'] = 'application/x-www-form-urlencoded'; }
   const r = await fetch(path, opt);
   let j = {};
   try { j = await r.json(); } catch (e) { /* empty body */ }

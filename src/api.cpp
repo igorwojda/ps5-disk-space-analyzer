@@ -725,6 +725,17 @@ void ApiHandle(const Request& req, Response& res) {
     return;
   }
 
+  // Only the app's own page may change anything. Any web page can send a form
+  // POST to a LAN address, but not with a header of its own: that needs a CORS
+  // preflight this server never allows.
+  if (req.method != "GET" && req.method != "HEAD") {
+    auto h = req.headers.find("x-dsa");
+    if (h == req.headers.end() || h->second != "1") {
+      Error(res, 403, "Requests that change anything must come from the app's page");
+      return;
+    }
+  }
+
   if (p == "/api/info") {
     // A request from another device arrived on the LAN address already. The
     // PS5 browser uses 127.0.0.1, so ask the routing table instead.
