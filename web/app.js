@@ -122,6 +122,7 @@ function applySettings() {
   clampList('rfocus', 'rscroll', S.marked.size);
   clampList('gfocus', 'gscroll', S.gameList.length, GVIS);
   clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
+  clampList('nfocus', 'nscroll', S.gnode ? S.gnode.children.length : 0);
 }
 
 // Step a setting through its values; applied (and saved) at once.
@@ -149,6 +150,7 @@ const S = {
   biggest: [], bfocus: 0, bscroll: 0,
   games: 'idle', gameList: [], gfocus: 0, gscroll: 0,  // Games tab: list of games
   game: null, pfocus: 0, pscroll: 0,                  // ... and the open game's folders
+  gpart: null, gnode: null, nfocus: 0, nscroll: 0,    // ... and a folder browsed inside one of them
   marked: new Map(),  // path -> item
   rfocus: 0, rscroll: 0, rbutton: false,
   dialog: null,
@@ -190,7 +192,10 @@ function hasMarkedInside(item) {
 
 function focusedItem() {
   if (S.tab === 1) return S.biggest[S.bfocus] || null;
-  if (S.tab === 2) return (S.game ? S.game.parts[S.pfocus] : S.gameList[S.gfocus]) || null;
+  if (S.tab === 2) {
+    if (S.gnode) return S.gnode.children[S.nfocus] || null;
+    return (S.game ? S.game.parts[S.pfocus] : S.gameList[S.gfocus]) || null;
+  }
   return S.node ? S.node.children[S.focus] || null : null;
 }
 
@@ -265,6 +270,10 @@ async function loadGames() {
   S.games = r.state;
   S.gameList = r.games.map(gameItem);
   if (S.game) S.game = S.gameList.find((g) => g.gid === S.game.gid) || null;
+  if (S.gpart) {
+    const p = S.game && S.game.parts.find((x) => x.path === S.gpart.path);
+    if (p) S.gpart = p; else S.gpart = S.gnode = null;
+  }
   clampList('gfocus', 'gscroll', S.gameList.length, GVIS);
   clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
   if (r.state === 'counting') gamesTimer = setTimeout(loadGames, 1000);
@@ -305,7 +314,7 @@ async function enterBrowse(st) {
   S.tab = 0;
   S.resultSeq = st.result ? st.result.seq : 0;
   S.screen = 'browse';
-  S.game = null;
+  S.game = S.gpart = S.gnode = null;
   S.gfocus = S.gscroll = 0;
   loadGames();
   await loadBiggest();
@@ -337,7 +346,8 @@ function reveal(id, parentId) {
 function addMark(item) {
   for (const [k, m] of S.marked) if (m.path.startsWith(item.path + '/')) S.marked.delete(k);
   // Remember the folder it lives in, so the review screen can show it.
-  const parentId = item.parentId != null ? item.parentId : S.node ? S.node.id : S.rootId;
+  const cur = S.tab === 2 && S.gnode ? S.gnode : S.node;
+  const parentId = item.parentId != null ? item.parentId : cur ? cur.id : S.rootId;
   S.marked.set(item.path, Object.assign({ parentId }, item));
 }
 
@@ -381,6 +391,7 @@ function toggleMark(item) {
 function openGame(g) {
   if (!g) return;
   S.game = g;
+  S.gpart = S.gnode = null;
   S.pfocus = S.pscroll = 0;
   S.hover = null;
   render();
@@ -388,9 +399,53 @@ function openGame(g) {
 function closeGame() {
   if (!S.game) return;
   const i = S.gameList.indexOf(S.game);
-  S.game = null;
+  ++loadToken;
+  S.game = S.gpart = S.gnode = null;
   S.hover = null;
   if (i >= 0) { S.gfocus = i; clampList('gfocus', 'gscroll', S.gameList.length, GVIS); }
+  render();
+}
+
+// Games tab: browse inside one of a game's folders without leaving the tab.
+function openPart(p) {
+  if (!p) return;
+  if (p.id == null) { toast(`On ${p.volume}: scan that storage to browse this folder`); return; }
+  S.gpart = p;
+  openGameNode(p.id);
+}
+async function openGameNode(id, focusId) {
+  const token = ++loadToken;
+  let n;
+  try { n = await api('/api/node?id=' + id); } catch (e) {
+    if (token !== loadToken) return;
+    if (e.status !== 404) toast('Could not open folder: ' + e.message);
+    if (S.gpart && id !== S.gpart.id) openGameNode(S.gpart.id); else closePart();
+    return;
+  }
+  if (token !== loadToken || !S.gpart) return;
+  S.gnode = n;
+  S.hover = null;
+  S.nfocus = 0;
+  if (focusId != null) {
+    const i = n.children.findIndex((c) => c.id === focusId);
+    if (i >= 0) S.nfocus = i;
+  }
+  S.nscroll = Math.max(0, S.nfocus - (VIS >> 1));
+  clampList('nfocus', 'nscroll', n.children.length);
+  render();
+}
+// Up a folder; past the game folder itself, back to the game's folder list.
+function gameUp() {
+  const n = S.gnode;
+  if (!n || n.id === S.gpart.id || n.parent < 0) closePart();
+  else openGameNode(n.parent, n.id);
+}
+function closePart() {
+  ++loadToken;
+  const i = S.game && S.gpart ? S.game.parts.indexOf(S.gpart) : -1;
+  S.gpart = S.gnode = null;
+  S.hover = null;
+  if (i >= 0) { S.pfocus = i; clampList('pfocus', 'pscroll', S.game.parts.length, PVIS); }
   render();
 }
 
@@ -450,6 +505,7 @@ async function pollDelete() {
   loadGames();
   await loadBiggest();
   await openNode(S.node ? S.node.id : S.rootId, null);
+  if (S.gnode) openGameNode(S.gnode.id);
   showDialog({
     title: r.errors ? 'Cleanup finished with problems' : 'Cleanup complete',
     lines: [`Freed ${fmtSize(r.freed)}.`, `${fmtCount(r.removed)} of ${fmtCount(r.total)} selected items removed.`],
@@ -666,6 +722,23 @@ function browseInput(a) {
 }
 
 function gamesInput(a) {
+  if (S.gnode) {
+    const n = S.gnode, f = n.children[S.nfocus];
+    if (a === 'up') S.nfocus--;
+    else if (a === 'down') S.nfocus++;
+    else if (a === 'pageup') S.nfocus -= VIS;
+    else if (a === 'pagedown') S.nfocus += VIS;
+    else if (a === 'confirm' || a === 'right') {
+      if (f && f.dir && !f.mount) openGameNode(f.id);
+      else if (f && a === 'confirm') toast(f.mount ? 'Separate volume: scan it from the storage list'
+                                                   : 'Press Square to select this file for cleanup');
+      return;
+    } else if (a === 'left' || a === 'back') { gameUp(); return; }
+    else if (a === 'mark') { toggleMark(f); return; }
+    clampList('nfocus', 'nscroll', n.children.length);
+    render();
+    return;
+  }
   const g = S.game;
   const [fk, sk, list] = g ? ['pfocus', 'pscroll', g.parts] : ['gfocus', 'gscroll', S.gameList];
   const vis = g ? PVIS : GVIS;
@@ -674,7 +747,7 @@ function gamesInput(a) {
   else if (a === 'down') S[fk]++;
   else if (a === 'pageup') S[fk] -= vis;
   else if (a === 'pagedown') S[fk] += vis;
-  else if (a === 'confirm' || a === 'right') { if (f) { if (g) revealPath(f); else openGame(f); } return; }
+  else if (a === 'confirm' || a === 'right') { if (f) { if (g) openPart(f); else openGame(f); } return; }
   else if (a === 'mark') { toggleMark(f); return; }
   else if (a === 'back' || a === 'left') { if (g) closeGame(); else if (a === 'back') leaveScan(); return; }
   clampList(fk, sk, list.length, vis);
@@ -719,7 +792,7 @@ function act(el) {
     case 'crumb': S.tab = 0; openNode(i); break;
     case 'check': {
       const item = S.screen === 'review' ? markedList()[i] : S.tab === 1 ? S.biggest[i]
-        : S.tab === 2 ? (S.game ? S.game.parts[i] : S.gameList[i]) : S.node.children[i];
+        : S.tab === 2 ? (S.gnode ? S.gnode.children[i] : S.game ? S.game.parts[i] : S.gameList[i]) : S.node.children[i];
       toggleMark(item);
       if (S.screen === 'review' && !S.marked.size) { S.screen = 'browse'; render(); }
       break;
@@ -728,7 +801,11 @@ function act(el) {
       if (S.screen === 'review') { S.rfocus = i; S.rbutton = false; revealPath(markedList()[i]); break; }
       if (S.tab === 1) { S.bfocus = i; reveal(S.biggest[i].id, S.biggest[i].parentId); break; }
       if (S.tab === 2) {
-        if (S.game) { S.pfocus = i; revealPath(S.game.parts[i]); } else { S.gfocus = i; openGame(S.gameList[i]); }
+        if (S.gnode) {
+          const c = S.gnode.children[i];
+          S.nfocus = i;
+          if (c.dir && !c.mount) openGameNode(c.id); else toggleMark(c);
+        } else if (S.game) { S.pfocus = i; openPart(S.game.parts[i]); } else { S.gfocus = i; openGame(S.gameList[i]); }
         break;
       }
       S.focus = i;
@@ -744,7 +821,12 @@ function act(el) {
         break;
       }
       if (S.tab === 2) {
-        if (S.game) { const p = S.game.parts.find((x) => x.cid === s.id); if (p) revealPath(p); break; }
+        if (S.gnode) {
+          if (s.dir && s.hasKids) openGameNode(s.id);
+          else openGameNode(s.chain.length > 1 ? s.chain[s.chain.length - 2] : chart.rootId, s.id);
+          break;
+        }
+        if (S.game) { const p = S.game.parts.find((x) => x.cid === s.id); if (p) openPart(p); break; }
         const g = S.gameList.find((x) => x.cid === s.chain[0]);
         if (g) {
           openGame(g);
@@ -757,8 +839,10 @@ function act(el) {
       else reveal(s.id, s.chain.length > 1 ? s.chain[s.chain.length - 2] : chart.rootId);
       break;
     }
-    case 'center': if (S.tab === 0) goUp(); else if (S.tab === 2) closeGame(); break;
+    case 'center': if (S.tab === 0) goUp(); else if (S.tab === 2) { if (S.gnode) gameUp(); else closeGame(); } break;
     case 'gcrumb': closeGame(); break;
+    case 'gpcrumb': closePart(); break;
+    case 'gncrumb': openGameNode(i); break;
     case 'hint': input(el.dataset.a, 'click'); break;
     case 'delbtn': askDelete(); break;
     case 'dlg':
@@ -780,7 +864,7 @@ function hover(el) {
     if (S.screen === 'review') { if (S.rfocus !== i || S.rbutton) { S.rfocus = i; S.rbutton = false; changed = true; } }
     else if (S.tab === 1) { if (S.bfocus !== i) { S.bfocus = i; changed = true; } }
     else if (S.tab === 2) {
-      const fk = S.game ? 'pfocus' : 'gfocus';
+      const fk = S.gnode ? 'nfocus' : S.game ? 'pfocus' : 'gfocus';
       if (S[fk] !== i) { S[fk] = i; changed = true; }
     } else if (S.focus !== i) { S.focus = i; changed = true; }
   }
@@ -800,6 +884,9 @@ function hover(el) {
       } else if (s && S.tab === 1) {
         const j = S.biggest.findIndex((c) => c.id === s.id);
         if (j >= 0) { S.bfocus = j; clampList('bfocus', 'bscroll', S.biggest.length); }
+      } else if (s && S.tab === 2 && S.gnode) {
+        const j = S.gnode.children.findIndex((c) => c.id === s.chain[0]);
+        if (j >= 0) { S.nfocus = j; clampList('nfocus', 'nscroll', S.gnode.children.length); }
       } else if (s && S.tab === 2) {
         const [fk, sk, list] = S.game ? ['pfocus', 'pscroll', S.game.parts] : ['gfocus', 'gscroll', S.gameList];
         const j = list.findIndex((c) => c.cid === s.chain[0]);
@@ -1234,17 +1321,7 @@ function renderBrowse() {
   const st = S.storage || {};
   let h = header(st.name || '', st.path || '', true) + '<div class="abs panel"></div>';
   if (S.tab === 0 && S.node) {
-    const n = S.node;
-    const title = n.id === S.rootId ? st.name : n.name;
-    const game = n.title ? ` <span class="tid">${esc(n.title)}</span>` : '';
-    h += `<div class="abs panel-title ellipsis">${esc(title)}${game}</div>
-      <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div><div class="abs rows">`;
-    for (let i = S.scroll; i < n.children.length && i < S.scroll + VIS; i++)
-      h += row(n.children[i], i, i === S.focus, 0, n.size);
-    h += '</div>';
-    if (!n.children.length) h += '<div class="abs empty">Empty folder</div>';
-    h += scrollbar(S.scroll, n.children.length);
-    buildChart(n);
+    h += folderPanel(S.node, S.focus, S.scroll);
   } else if (S.tab === 1) {
     h += `<div class="abs panel-title">Biggest files</div>
       <div class="abs panel-meta">Top ${fmtCount(S.biggest.length)} on this storage</div><div class="abs rows">`;
@@ -1255,19 +1332,21 @@ function renderBrowse() {
     h += scrollbar(S.bscroll, S.biggest.length);
     const total = S.biggest.reduce((t, b) => t + b.size, 0);
     buildChart({ id: -2, size: total, rings: S.biggest.map((b) => ({ id: b.id, name: b.name, size: b.size })) }, true);
+  } else if (S.tab === 2 && S.gnode) {
+    h += folderPanel(S.gnode, S.nfocus, S.nscroll);
   } else if (S.tab === 2) {
     h += renderGames();
   }
 
   // Center disc: what is under focus, relative to the chart root.
-  const croot = S.tab === 0 ? S.node : S.tab === 1 ? S.rootNode : S.game || gamesRoot();
+  const croot = S.tab === 0 ? S.node : S.tab === 1 ? S.rootNode : S.gnode || S.game || gamesRoot();
   if (croot && (S.tab !== 2 || S.gameList.length)) {
     const f = focusedItem();
     const info = S.hover || f || croot;
-    const name = info.id === S.rootId ? st.name : info.name;
+    const name = nodeName(info);
     const g2 = info.sub || info.title;
     const game = g2 ? `<div class="g ellipsis">${esc(g2)}</div>` : '';
-    const of = S.tab === 1 ? ' of storage' : S.tab === 0 ? ' of folder' : S.game ? ' of game' : ' of all games';
+    const of = S.tab === 1 ? ' of storage' : S.tab === 0 || S.gnode ? ' of folder' : S.game ? ' of game' : ' of all games';
     let p;
     if (info !== croot && croot.size) p = fmtPct(info.size / croot.size) + of;
     else p = fmtCount(croot.files) + ' files';
@@ -1279,21 +1358,32 @@ function renderBrowse() {
   // pointer), wrapping as needed, since rows and the centre disc cut it.
   // Game folders show the game's name with the title ID.
   let ct = null;
-  if (S.tab === 2) {
+  if (S.tab === 2 && !S.gnode) {
     const hg = S.hover && !S.game ? S.gameList.find((x) => x.cid === S.hover.chain[0]) : null;
     const g = S.game || hg || S.gameList[S.gfocus];
     if (g) ct = { name: g.name, sub: g.sub };
   } else {
-    const it = S.hover || focusedItem() || (S.tab === 0 ? S.node : null);
-    if (it) ct = it.title ? { name: it.title, sub: it.name } : { name: it.id === S.rootId ? st.name : it.name };
+    const it = S.hover || focusedItem() || (S.tab === 0 ? S.node : S.gnode);
+    if (it) ct = it.title ? { name: it.title, sub: nodeName(it) } : { name: nodeName(it) };
   }
   if (ct) h += `<div class="abs ctitle">${esc(ct.name)}${ct.sub ? `<span class="tid">${esc(ct.sub)}</span>` : ''}</div>`;
 
   // Breadcrumb
   if (S.tab === 2) {
-    const g = S.game;
-    h += `<div class="abs crumbs ellipsis">${g ? `<span data-act="gcrumb">Games</span> &nbsp;&rsaquo;&nbsp; <b>${esc(g.name)}</b>`
-                                             : '<b>Games</b>'}</div>`;
+    const g = S.game, n = S.gnode;
+    let parts = ['<span data-act="gcrumb">Games</span>'];
+    if (g) parts.push(n ? `<span data-act="gpcrumb">${esc(g.name)}</span>` : `<b>${esc(g.name)}</b>`);
+    if (n) {
+      // The folder's own crumbs, from the game folder down.
+      const cr = n.crumbs.slice(Math.max(0, n.crumbs.findIndex((c) => c.id === S.gpart.id)));
+      parts = parts.concat(cr.map((c, i) => {
+        const label = esc(i === 0 ? S.gpart.name : c.name);
+        return i === cr.length - 1 ? `<b>${label}</b>` : `<span data-act="gncrumb" data-i="${c.id}">${label}</span>`;
+      }));
+    }
+    if (!g) parts = ['<b>Games</b>'];
+    if (parts.length > 6) parts = parts.slice(0, 2).concat(['&hellip;'], parts.slice(-3));
+    h += `<div class="abs crumbs ellipsis">${parts.join(' &nbsp;&rsaquo;&nbsp; ')}</div>`;
   } else if (S.node) {
     const cr = S.node.crumbs;
     let parts = cr.map((c, i) => {
@@ -1305,11 +1395,8 @@ function renderBrowse() {
     h += `<div class="abs crumbs ellipsis">${parts.join(' &nbsp;&rsaquo;&nbsp; ')}</div>`;
   }
 
-  let hints = S.tab === 0 || (S.tab === 2 && !S.game)
+  let hints = S.tab !== 1
     ? hint('cross', 'Open', 'confirm') + hint('circle', 'Back', 'back') + hint('square', 'Select', 'mark') +
-      hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor')
-    : S.tab === 2
-    ? hint('cross', 'Show in folder', 'confirm') + hint('circle', 'Back', 'back') + hint('square', 'Select', 'mark') +
       hint('options', 'Menu', 'menu') + hint('lstick', 'Cursor')
     : hint('cross', 'Show in folder', 'confirm') + hint('square', 'Select', 'mark') + hint('options', 'Menu', 'menu') +
       hint('lstick', 'Cursor');
@@ -1320,6 +1407,27 @@ function renderBrowse() {
     hints += `<div class="hint-right muted">${glyphText('Press Square to select items to delete')}</div>`;
   }
   return [h, hints];
+}
+
+// A folder's name; the scanned root and a game folder go by friendlier names.
+function nodeName(n) {
+  if (n.id === S.rootId) return (S.storage || {}).name || n.name;
+  if (S.tab === 2 && S.gpart && n.id === S.gpart.id) return S.gpart.name;
+  return n.name;
+}
+
+// A scanned folder's contents: Folders tab, or a game's folder in the Games tab.
+function folderPanel(n, focus, scroll) {
+  const game = n.title ? ` <span class="tid">${esc(n.title)}</span>` : '';
+  let h = `<div class="abs panel-title ellipsis">${esc(nodeName(n))}${game}</div>
+    <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div><div class="abs rows">`;
+  for (let i = scroll; i < n.children.length && i < scroll + VIS; i++)
+    h += row(n.children[i], i, i === focus, 0, n.size);
+  h += '</div>';
+  if (!n.children.length) h += '<div class="abs empty">Empty folder</div>';
+  h += scrollbar(scroll, n.children.length);
+  buildChart(n);
+  return h;
 }
 
 // All games together: the Games tab's chart root.
