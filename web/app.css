@@ -127,6 +127,19 @@ svg { display: block; }
 .row.focus .size, .row.focus .sub, .row.focus .folder { color: var(--text); }
 .empty { left: 40px; top: 520px; width: 1000px; text-align: center; font-size: calc(30px * var(--fs)); color: var(--dim); }
 .scroll { left: 1018px; top: 214px; width: 6px; height: 714px; border-radius: 3px; background: rgba(255, 255, 255, .07); }
+/* Browse: the menu bar above the list, which starts lower to make room (app.js sets the sizes). */
+.rows.m, .scroll.m { top: var(--list-top); }
+.scroll.m { height: var(--list-h); }
+.menubar { left: 70px; top: var(--menu-top); display: flex; gap: 16px; }
+.mbtn {
+  height: var(--menu-h); padding: 0 calc(26px * var(--fs)) 0 calc(18px * var(--fs)); border-radius: 999px;
+  display: flex; align-items: center; gap: calc(12px * var(--fs)); background: rgba(255, 255, 255, .07);
+  box-shadow: 0 0 0 2px var(--panel-line); font-size: calc(26px * var(--fs)); font-weight: 700; color: var(--text);
+}
+.mbtn.focus { background: var(--focus-bg); box-shadow: 0 0 0 4px var(--focus-ring); }
+.mico { display: flex; color: var(--dim); }
+.mico svg { width: calc(28px * var(--fs)); height: calc(28px * var(--fs)); }
+.mbtn.focus .mico { color: var(--text); }
 .scroll > i { position: absolute; left: 0; width: 6px; border-radius: 3px; background: rgba(255, 255, 255, .43); }
 
 /* ---------------------------------------------------------------- chart */

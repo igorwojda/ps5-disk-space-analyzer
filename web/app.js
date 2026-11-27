@@ -14,6 +14,8 @@
 //   Square / Space          select             Triangle / Tab     review & clean, paste
 //   L1 R1 / Q E             switch tab         L2 R2 / PgUp PgDn  page
 //   Options / M             menu
+// Browse lists have a menu bar above them (Select All, Rescan): Up from the
+// first row moves focus into it, Down goes back to the list.
 //   Left stick / mouse      cursor: hover focuses, Cross/click acts on what is under it
 // The Gamepad API is used when the browser offers it; otherwise the PS5
 // browser's own key events and cursor clicks do the job. The PS5 browser
@@ -22,6 +24,7 @@
 'use strict';
 
 let VIS = 10;              // list rows on screen, fewer with bigger text
+let RVIS = 10;             // review screen list rows (no menu bar above it)
 let GVIS = 4;              // Games tab: game rows on screen (cover and a line per kind of data)
 let PVIS = 6;              // Games tab: an open game's folder rows (two lines of details)
 const HOLD_MS = 1200;      // hold Cross this long to delete
@@ -62,6 +65,7 @@ const ICON = {
   checked: '<svg viewBox="0 0 30 30"><rect width="30" height="30" rx="7" fill="#2fbf55"/><path d="M7 15.5l5.5 5.5L23.5 9" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   gear: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.2h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.2 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>',
   report: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 18h2v-5H9zm3.5 0h2v-8h-2zm3.5 0h2v-3h-2z" fill-rule="evenodd"/></svg>',
+  rescan: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M21.5 2.5v8h-8z" fill="currentColor"/></svg>',
   partial: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="#2fbf55" stroke-width="2.5"/><rect x="8" y="13" width="14" height="4" rx="2" fill="#2fbf55"/></svg>',
 };
 
@@ -108,7 +112,8 @@ function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* no storage */ }
 }
 
-const ROWS_H = 714, ROW_GAP = 6;
+const ROWS_H = 714, ROW_GAP = 6, ROWS_END = 928;
+let LIST_H = ROWS_H;       // browse list height, below the menu bar
 function applySettings() {
   const root = document.documentElement;
   const fs = settings.textSize;
@@ -118,15 +123,24 @@ function applySettings() {
   root.style.setProperty('--row', rowH + 'px');
   root.style.setProperty('--row-tall', tallH + 'px');
   root.style.setProperty('--row-game', gameH + 'px');
-  VIS = Math.floor((ROWS_H + ROW_GAP) / (rowH + ROW_GAP));
-  PVIS = Math.floor((ROWS_H + ROW_GAP) / (tallH + ROW_GAP));
-  GVIS = Math.floor((ROWS_H + ROW_GAP) / (gameH + ROW_GAP));
+  // Browse: the menu bar sits between the panel title and the list.
+  const menuTop = 148 + Math.round(52 * fs), menuH = Math.round(56 * fs);
+  const listTop = menuTop + menuH + 14;
+  LIST_H = ROWS_END - listTop;
+  root.style.setProperty('--menu-top', menuTop + 'px');
+  root.style.setProperty('--menu-h', menuH + 'px');
+  root.style.setProperty('--list-top', listTop + 'px');
+  root.style.setProperty('--list-h', LIST_H + 'px');
+  VIS = Math.floor((LIST_H + ROW_GAP) / (rowH + ROW_GAP));
+  PVIS = Math.floor((LIST_H + ROW_GAP) / (tallH + ROW_GAP));
+  GVIS = Math.floor((LIST_H + ROW_GAP) / (gameH + ROW_GAP));
+  RVIS = Math.floor((ROWS_H + ROW_GAP) / (rowH + ROW_GAP));
   root.dataset.theme = settings.theme;
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = settings.theme === 'blue' ? '#081d36' : '#000000';
   clampList('focus', 'scroll', S.node ? S.node.children.length : 0);
   clampList('bfocus', 'bscroll', S.biggest.length);
-  clampList('rfocus', 'rscroll', S.marked.size);
+  clampList('rfocus', 'rscroll', S.marked.size, RVIS);
   clampList('gfocus', 'gscroll', S.gameList.length, GVIS);
   clampList('pfocus', 'pscroll', S.game ? S.game.parts.length : 0, PVIS);
   clampList('nfocus', 'nscroll', S.gnode ? S.gnode.children.length : 0);
@@ -161,6 +175,7 @@ const S = {
   marked: new Map(),  // path -> item
   rfocus: 0, rscroll: 0,
   rbtn: -1,           // review: focused button (RBTN), -1 = the list
+  mfocus: -1,         // browse: focused menu bar button (MENU), -1 = the list
   clip: null,         // cut items waiting for a destination folder, on any storage
   clipFrom: null,     // ... and the storage they were cut on
   clipMode: 'cut',    // 'cut' (Cut, Paste) or 'move' (Move to, Move here)
@@ -335,6 +350,7 @@ async function enterBrowse(st, place) {
   S.tab = 0;
   S.resultSeq = st.result ? st.result.seq : 0;
   S.screen = 'browse';
+  S.mfocus = -1;
   S.game = S.gpart = S.gnode = null;
   S.gfocus = S.gscroll = 0;
   const back = place && place.storage === S.storage.path ? place : null;
@@ -480,6 +496,65 @@ function cancelScan() {
   scanCancelled = true;
   api('/api/cancel', 'POST').catch(() => {});
   toast('Scan cancelled');
+}
+
+// ================================================================ menu bar
+
+// The list on screen in the browse tab, with its focus and scroll keys.
+function browseList() {
+  if (S.tab === 1) return { fk: 'bfocus', sk: 'bscroll', list: S.biggest };
+  if (S.tab === 2) {
+    if (S.gnode) return { fk: 'nfocus', sk: 'nscroll', list: S.gnode.children };
+    if (S.game) return { fk: 'pfocus', sk: 'pscroll', list: S.game.parts };
+    return { fk: 'gfocus', sk: 'gscroll', list: S.gameList };
+  }
+  return { fk: 'focus', sk: 'scroll', list: S.node ? S.node.children : [] };
+}
+
+// Items Select All can take: not protected locations or other volumes.
+function selectable() {
+  return browseList().list.filter((x) => (x.kind === 'game' ? gameMarkState(x) !== 'locked' : !x.protected));
+}
+function allSelected(list) {
+  return list.length > 0 && list.every((x) => (x.kind === 'game' ? gameMarkState(x) === 'all' : isMarked(x)));
+}
+
+// Selects every item in the open list; when all already are, unselects them.
+function selectAll() {
+  if (S.clip) { toast(`${S.clipMode === 'move' ? 'Move' : 'Paste'} the waiting items first, or cancel in the Options menu`); return; }
+  const list = selectable();
+  if (!list.length) { toast('Nothing here can be selected'); return; }
+  // A game row stands for its folders.
+  const items = list.flatMap((x) => (x.kind === 'game' ? x.parts.filter((p) => !p.protected) : [x]));
+  if (allSelected(list)) {
+    for (const x of items) S.marked.delete(x.path);
+    toast(items.some(isMarked) ? 'Some items stay selected: a parent folder is selected' : 'Selection cleared');
+  } else {
+    for (const x of items) if (!isMarked(x)) addMark(x);
+    toast(`${fmtCount(list.length)} ${list.length === 1 ? 'item' : 'items'} selected`);
+  }
+  render();
+}
+
+const MENU = [
+  { label: () => (allSelected(selectable()) ? 'Unselect All' : 'Select All'),
+    icon: () => (allSelected(selectable()) ? ICON.checked : ICON.box), run: selectAll },
+  { label: () => 'Rescan', icon: () => ICON.rescan, run: () => refreshScan() },
+];
+
+function menuInput(a) {
+  if (a === 'left') S.mfocus = Math.max(0, S.mfocus - 1);
+  else if (a === 'right') S.mfocus = Math.min(MENU.length - 1, S.mfocus + 1);
+  else if (a === 'down' || a === 'back') S.mfocus = -1;
+  else if (a === 'confirm') { MENU[S.mfocus].run(); return; }
+  else return;
+  render();
+}
+
+function menuBar() {
+  return `<div class="abs menubar">${MENU.map((m, i) =>
+    `<div class="mbtn${S.mfocus === i ? ' focus' : ''}" data-act="mbtn" data-i="${i}">
+      <span class="mico">${m.icon()}</span><span>${esc(m.label())}</span></div>`).join('')}</div>`;
 }
 
 // ================================================================ actions
@@ -1140,6 +1215,11 @@ function browseInput(a) {
   if (a === 'tabprev' || a === 'tabnext') { S.tab = (S.tab + (a === 'tabnext' ? 1 : 2)) % 3; S.hover = null; render(); return; }
   if (a === 'menu') { openMenu(); return; }
   if (a === 'review') { if (S.clip) pasteHere(); else openReview(); return; }
+  if (S.mfocus >= 0) { menuInput(a); return; }
+  if (a === 'up') {
+    const b = browseList();
+    if (S[b.fk] <= 0) { S.mfocus = 0; render(); return; }
+  }
   if (S.tab === 2) { gamesInput(a); return; }
   if (S.tab === 1) {
     const n = S.biggest.length;
@@ -1230,8 +1310,8 @@ function reviewInput(a) {
   const b = S.rbtn, inList = b < 0;
   if (a === 'up') { if (inList) S.rfocus--; else if (b === RBTN.del) S.rbtn = RBTN.cut; }
   else if (a === 'down') { if (inList) S.rfocus++; else if (b !== RBTN.del) S.rbtn = RBTN.del; }
-  else if (a === 'pageup') S.rfocus -= VIS;
-  else if (a === 'pagedown') S.rfocus += VIS;
+  else if (a === 'pageup') S.rfocus -= RVIS;
+  else if (a === 'pagedown') S.rfocus += RVIS;
   else if (a === 'right') { if (inList) S.rbtn = RBTN.cut; else if (b < RBTN.clear) S.rbtn = b + 1; }
   else if (a === 'left') S.rbtn = b === RBTN.move || b === RBTN.clear ? b - 1 : -1;
   else if (a === 'back') { S.screen = 'browse'; render(); return; }
@@ -1243,7 +1323,7 @@ function reviewInput(a) {
     else if (list[S.rfocus]) revealPath(list[S.rfocus]);
     return;
   } else if (a === 'review') { askDelete(); return; }
-  clampList('rfocus', 'rscroll', S.marked.size);
+  clampList('rfocus', 'rscroll', S.marked.size, RVIS);
   render();
 }
 
@@ -1317,6 +1397,7 @@ function act(el) {
     case 'gncrumb': openGameNode(i); break;
     case 'hint': input(el.dataset.a, 'click'); break;
     case 'rbtn': S.rbtn = i; reviewAction(i); break;
+    case 'mbtn': S.mfocus = i; render(); MENU[i].run(); break;
     case 'dlg':
       if (S.dialog && S.dialog.settings) closeDialog(null);
       else if (S.dialog && i !== S.dialog.hold) closeDialog(i);
@@ -1332,6 +1413,8 @@ function hover(el) {
   let i = Number(el.dataset.i);
   let changed = false;
   if (k === 'storage' && S.hfocus !== i) { S.hfocus = i; changed = true; }
+  if ((k === 'row' || k === 'check') && S.screen === 'browse' && S.mfocus >= 0) { S.mfocus = -1; changed = true; }
+  if (k === 'mbtn' && S.mfocus !== i) { S.mfocus = i; changed = true; }
   if (k === 'row' || k === 'check') {
     if (S.screen === 'review') { if (S.rfocus !== i || S.rbtn >= 0) { S.rfocus = i; S.rbtn = -1; changed = true; } }
     else if (S.tab === 1) { if (S.bfocus !== i) { S.bfocus = i; changed = true; } }
@@ -1833,22 +1916,22 @@ function shortPath(p) {
   return p;
 }
 
-function scrollbar(first, total, vis = VIS) {
+function scrollbar(first, total, vis = VIS, review = false) {
   if (total <= vis) return '';
-  const h = 714, th = Math.max(40, h * vis / total), ty = (h - th) * first / Math.max(1, total - vis);
-  return `<div class="abs scroll"><i style="top:${ty}px;height:${th}px"></i></div>`;
+  const h = review ? ROWS_H : LIST_H, th = Math.max(40, h * vis / total), ty = (h - th) * first / Math.max(1, total - vis);
+  return `<div class="abs scroll${review ? '' : ' m'}"><i style="top:${ty}px;height:${th}px"></i></div>`;
 }
 
 function renderBrowse() {
   const st = S.storage || {};
-  let h = header(st.name || '', st.path || '', true) + '<div class="abs panel"></div>';
+  let h = header(st.name || '', st.path || '', true) + '<div class="abs panel"></div>' + menuBar();
   if (S.tab === 0 && S.node) {
     h += folderPanel(S.node, S.focus, S.scroll);
   } else if (S.tab === 1) {
     h += `<div class="abs panel-title">Biggest files</div>
-      <div class="abs panel-meta">Top ${fmtCount(S.biggest.length)} on this storage</div><div class="abs rows">`;
+      <div class="abs panel-meta">Top ${fmtCount(S.biggest.length)} on this storage</div><div class="abs rows m">`;
     for (let i = S.bscroll; i < S.biggest.length && i < S.bscroll + VIS; i++)
-      h += row(S.biggest[i], i, i === S.bfocus, 1, 0);
+      h += row(S.biggest[i], i, S.mfocus < 0 && i === S.bfocus, 1, 0);
     h += '</div>';
     if (!S.biggest.length) h += '<div class="abs empty">No files</div>';
     h += scrollbar(S.bscroll, S.biggest.length);
@@ -1950,9 +2033,9 @@ function nodeName(n) {
 function folderPanel(n, focus, scroll) {
   const game = n.title ? ` <span class="tid">${esc(n.title)}</span>` : '';
   let h = `<div class="abs panel-title ellipsis">${esc(nodeName(n))}${game}</div>
-    <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div><div class="abs rows">`;
+    <div class="abs panel-meta">${fmtSize(n.size)} &middot; ${fmtCount(n.files)} files</div><div class="abs rows m">`;
   for (let i = scroll; i < n.children.length && i < scroll + VIS; i++)
-    h += row(n.children[i], i, i === focus, 0, n.size);
+    h += row(n.children[i], i, S.mfocus < 0 && i === focus, 0, n.size);
   h += '</div>';
   if (!n.children.length) h += '<div class="abs empty">Empty folder</div>';
   h += scrollbar(scroll, n.children.length);
@@ -1972,9 +2055,9 @@ function renderGames() {
   const g = S.game;
   if (g) {
     h = `<div class="abs panel-title ellipsis">${esc(g.name)}${g.sub ? ` <span class="tid">${esc(g.sub)}</span>` : ''}</div>
-      <div class="abs panel-meta">${fmtSize(g.size)} &middot; ${fmtCount(g.files)} files</div><div class="abs rows">`;
+      <div class="abs panel-meta">${fmtSize(g.size)} &middot; ${fmtCount(g.files)} files</div><div class="abs rows m">`;
     for (let i = S.pscroll; i < g.parts.length && i < S.pscroll + PVIS; i++)
-      h += row(g.parts[i], i, i === S.pfocus, 4, g.size);
+      h += row(g.parts[i], i, S.mfocus < 0 && i === S.pfocus, 4, g.size);
     h += '</div>' + scrollbar(S.pscroll, g.parts.length, PVIS);
     buildChart({ id: g.cid, size: g.size, rings: g.parts.map((p) => ({ id: p.cid, name: p.name, title: g.name, size: p.size, dir: true })) });
     return h;
@@ -1983,9 +2066,9 @@ function renderGames() {
   const counting = S.games === 'counting';
   h = `<div class="abs panel-title">Games</div>
     <div class="abs panel-meta">${counting ? 'Counting&hellip;' : `${fmtCount(S.gameList.length)} games &middot; ${fmtSize(all.size)}`}</div>
-    <div class="abs rows">`;
+    <div class="abs rows m">`;
   for (let i = S.gscroll; i < S.gameList.length && i < S.gscroll + GVIS; i++)
-    h += row(S.gameList[i], i, i === S.gfocus, 3, all.size);
+    h += row(S.gameList[i], i, S.mfocus < 0 && i === S.gfocus, 3, all.size);
   h += '</div>' + scrollbar(S.gscroll, S.gameList.length, GVIS);
   if (!S.gameList.length) h += `<div class="abs empty">${counting ? 'Counting game data on all storages&hellip;' : 'No games found'}</div>`;
   if (S.gameList.length) {
@@ -2006,9 +2089,9 @@ function renderReview() {
     `<div class="abs panel"></div><div class="abs summary"></div>
     <div class="abs panel-title">Selected items</div>
     <div class="abs panel-meta">${fmtCount(list.length)} items</div><div class="abs rows">`;
-  for (let i = S.rscroll; i < list.length && i < S.rscroll + VIS; i++)
+  for (let i = S.rscroll; i < list.length && i < S.rscroll + RVIS; i++)
     h += row(list[i], i, S.rbtn < 0 && i === S.rfocus, 2, 0);
-  h += '</div>' + scrollbar(S.rscroll, list.length);
+  h += '</div>' + scrollbar(S.rscroll, list.length, RVIS, true);
 
   const bytes = markedBytes();
   // A game being uninstalled takes its update, add-ons and home screen info
