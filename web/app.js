@@ -84,7 +84,7 @@ const GLYPH = {
 
 // Kept in this browser's localStorage, so each device has its own.
 const SETTINGS = [
-  { key: 'textSize', label: 'Text size', values: [0.7, 0.85, 1, 1.15, 1.3], def: 1,
+  { key: 'textSize', label: 'Text size', values: [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5], def: 1,
     show: (v) => Math.round(v * 100) + '%' },
   { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
     show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
