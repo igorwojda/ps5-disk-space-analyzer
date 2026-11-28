@@ -21,7 +21,7 @@
 
 #include "web_assets.h"
 
-#define TITLE_ID "DSAN00002"
+#define TITLE_ID OWN_TITLE_ID
 // Tiles of earlier builds, removed if present.
 static const char* const kOldTitleIds[] = {"DSKA00001", "DSAN00001", "SSAN00001"};
 

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "launcher.h"
 #include "uninstall.h"
 
 bool QuerySpace(const std::string& path, uint64_t* total, uint64_t* free) {
@@ -238,6 +239,12 @@ bool IsProtected(const std::string& p) {
   if (HasPrefix(p, "/user/data/homebrew/FAKE77031") || HasPrefix(p, "/data/homebrew/FAKE77031") ||
       HasPrefix(p, "/user/app/FAKE77031"))
     return true;
+  // This app itself, on any drive: removing it would end the running app.
+  const std::string own = std::string("/" OWN_TITLE_ID);
+  for (size_t at = p.find(own); at != std::string::npos; at = p.find(own, at + 1)) {
+    size_t end = at + own.size();
+    if (end == p.size() || p[end] == '/') return true;
+  }
 #else
   if (const char* home = std::getenv("HOME"))
     if (p == home) return true;
