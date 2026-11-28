@@ -358,7 +358,14 @@ async function loadStorages() {
   S.hfocus = Math.min(S.hfocus, Math.max(0, S.storages.length - 1));
 }
 
-async function openNode(id, focusId) {
+// `at` ({name, index, scroll}): the row to come back to after a change. The
+// item by name when it is still there, else the row it was in.
+function rowAt(children, at) {
+  const i = at.name ? children.findIndex((c) => c.name === at.name) : -1;
+  return i >= 0 ? i : at.index || 0;
+}
+
+async function openNode(id, focusId, at) {
   const token = ++loadToken;
   let n;
   try { n = await api('/api/node?id=' + id); } catch (e) {
@@ -373,8 +380,8 @@ async function openNode(id, focusId) {
   if (focusId != null) {
     const i = n.children.findIndex((c) => c.id === focusId);
     if (i >= 0) S.focus = i;
-  }
-  S.scroll = Math.max(0, S.focus - (VIS >> 1));
+  } else if (at) S.focus = rowAt(n.children, at);
+  S.scroll = at && at.scroll != null ? at.scroll : Math.max(0, S.focus - (VIS >> 1));
   clampList('focus', 'scroll', n.children.length);
   if (n.id === S.rootId) S.rootNode = n;
   render();
@@ -419,10 +426,16 @@ async function loadGames() {
   let r;
   try { r = await api('/api/games'); } catch (e) { gamesTimer = setTimeout(loadGames, 2000); return; }
   const tabsBefore = shownTabs().join();
+  // A delete or move resorts the list: the focused game and folder stay focused.
+  const fg = S.gameList[S.gfocus], fp = S.game && S.game.parts[S.pfocus];
   S.games = r.state;
   S.allGames = r.games.map(gameItem);
   S.gameList = tabList(S.gkind);
+  const gi = fg ? S.gameList.findIndex((g) => g.gid === fg.gid) : -1;
+  if (gi >= 0) S.gfocus = gi;
   if (S.game) S.game = S.gameList.find((g) => g.gid === S.game.gid) || null;
+  const pi = S.game && fp ? S.game.parts.findIndex((p) => p.path === fp.path) : -1;
+  if (pi >= 0) S.pfocus = pi;
   if (S.gpart) {
     const p = S.game && S.game.parts.find((x) => x.path === S.gpart.path);
     if (p) S.gpart = p; else S.gpart = S.gnode = null;
@@ -531,15 +544,16 @@ function savePlace() {
   try { localStorage.setItem(PLACE_KEY, JSON.stringify(currentPlace())); } catch (e) { /* no storage */ }
 }
 
-// The child folders from `n` down to `path`, by name; null when one is gone.
-async function walkTo(n, path) {
+// The child folders from `n` down to `path`, by name; null when one is gone,
+// or with `nearest` the last folder on the way that is still there.
+async function walkTo(n, path, nearest = false) {
   const base = n.path.endsWith('/') ? n.path : n.path + '/';
   if (!path || path === n.path) return n;
-  if (!path.startsWith(base)) return null;
+  if (!path.startsWith(base)) return nearest ? n : null;
   for (const name of path.slice(base.length).split('/').filter(Boolean)) {
     const c = n.children.find((x) => x.name === name && x.dir && !x.mount);
-    if (!c) return null;
-    try { n = await api('/api/node?id=' + c.id); } catch (e) { return null; }
+    if (!c) return nearest ? n : null;
+    try { n = await api('/api/node?id=' + c.id); } catch (e) { return nearest ? n : null; }
   }
   return n;
 }
@@ -778,7 +792,7 @@ function openPart(p) {
   S.gpart = p;
   openGameNode(p.id);
 }
-async function openGameNode(id, focusId) {
+async function openGameNode(id, focusId, at) {
   const token = ++loadToken;
   let n;
   try { n = await api('/api/node?id=' + id); } catch (e) {
@@ -794,8 +808,8 @@ async function openGameNode(id, focusId) {
   if (focusId != null) {
     const i = n.children.findIndex((c) => c.id === focusId);
     if (i >= 0) S.nfocus = i;
-  }
-  S.nscroll = Math.max(0, S.nfocus - (VIS >> 1));
+  } else if (at) S.nfocus = rowAt(n.children, at);
+  S.nscroll = at && at.scroll != null ? at.scroll : Math.max(0, S.nfocus - (VIS >> 1));
   clampList('nfocus', 'nscroll', n.children.length);
   render();
 }
@@ -852,14 +866,20 @@ async function runDelete(list) {
   const ids = list.filter((m) => typeof m.id === 'number').map((m) => m.id);
   const paths = list.filter((m) => typeof m.id !== 'number').map((m) => m.path);
   const body = 'scan=' + S.scanSeq + '&ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
+  // The progress screen first: a press while the request is out must not act
+  // on the list being deleted (Cross on the review list opens Folders).
+  const back = S.screen;
+  S.screen = 'deleting';
+  S.scan = { index: 0, total: list.length, freed: 0, goal: markedBytes(), current: '' };
+  render();
+  await keepPlace(list);
   try { await api('/api/delete', 'POST', body); } catch (e) {
+    S.screen = back;
+    render();
     if (e.data && e.data.stale) return reloadStale(e.message);
     toast('Delete failed to start: ' + e.message);
     return;
   }
-  S.screen = 'deleting';
-  S.scan = { index: 0, total: list.length, freed: 0, goal: markedBytes(), current: '' };
-  render();
   pollDelete();
 }
 
@@ -994,20 +1014,24 @@ async function runMove(list, dest, destName, onStart, from, paste) {
     const paths = list.filter((m) => typeof m.id !== 'number').map((m) => m.path);
     body += '&scan=' + S.scanSeq + '&ids=' + ids.join(',') + '&paths=' + encodeURIComponent(paths.join('\n'));
   }
+  // Only a move to another storage frees space on the source.
+  const src = from && S.storages.find((x) => x.path === from.path);
+  S.moveFrom = src ? { path: src.path, name: src.name, free: src.free } : null;
+  S.moveTo = destName;
+  const back = S.screen;  // the progress screen first, as for a delete
+  S.screen = 'moving';
+  S.scan = { index: 0, total: list.length, moved: 0, goal: list.reduce((t, m) => t + m.size, 0), current: '', dest };
+  render();
+  await keepPlace(list);
   try { await api('/api/move', 'POST', body); } catch (e) {
+    S.screen = back;
+    render();
     if (e.data && e.data.stale) return reloadStale(e.message);
     if (e.data && e.data.need) toast(`Not enough space on ${destName}: needs ${fmtSize(e.data.need)}, ${fmtSize(e.data.free)} free`);
     else toast('Move failed to start: ' + e.message);
     return;
   }
   if (onStart) onStart();
-  // Only a move to another storage frees space on the source.
-  const src = from && S.storages.find((x) => x.path === from.path);
-  S.moveFrom = src ? { path: src.path, name: src.name, free: src.free } : null;
-  S.moveTo = destName;
-  S.screen = 'moving';
-  S.scan = { index: 0, total: list.length, moved: 0, goal: list.reduce((t, m) => t + m.size, 0), current: '', dest };
-  render();
   pollMove();
 }
 
@@ -1039,16 +1063,59 @@ async function pollMove() {
   });
 }
 
-// Files changed on disk: fetch the folder, biggest files and games again.
+// Where the user is as a delete or move starts: the open folders and the row
+// in each list. Taken before the change, while the selected items are listed.
+let keptPlace = null;
+async function keepPlace(list) {
+  const row = (fk, sk, item) => ({ name: item ? item.name : '', index: S[fk], scroll: S[sk] });
+  const b = S.biggest[S.bfocus];
+  const k = {
+    path: S.node ? S.node.path : '', row: row('focus', 'scroll', S.node && S.node.children[S.focus]),
+    brow: { name: b ? b.path : '', index: S.bfocus, scroll: S.bscroll },
+    gpath: S.gnode ? S.gnode.path : '', grow: row('nfocus', 'nscroll', S.gnode && S.gnode.children[S.nfocus]),
+    up: {},  // folder path: the row there of the selected item an open folder is in
+  };
+  for (const p of [k.path, k.gpath]) {
+    const m = p && list.find((x) => p === x.path || p.startsWith(x.path + '/'));
+    if (!m || m.parentId == null || m.parentId < 0) continue;
+    try {
+      const n = await api('/api/node?id=' + m.parentId);
+      k.up[n.path] = { index: Math.max(0, n.children.findIndex((c) => c.path === m.path)) };
+    } catch (e) { /* its folder's first row then */ }
+  }
+  keptPlace = k;
+}
+
+// Open the folder at `path` below `fromId`, at its row; when the change took the
+// folder away, the nearest folder above it that is left, at the gone one's row.
+async function reopenAt(fromId, path, at, up, open) {
+  let from;
+  try { from = await api('/api/node?id=' + fromId); } catch (e) { return open(fromId); }
+  const n = await walkTo(from, path, true);
+  return open(n.id, null, n.path === path ? at : up[n.path] || { index: 0 });
+}
+
+// Files changed on disk: fetch the folder, biggest files and games again, and
+// stay where the user was.
 async function reloadAfterChange(st) {
+  const k = keptPlace;
+  keptPlace = null;
   S.storage = st.storage;
   S.resultSeq = st.result.seq;
   S.screen = 'browse';
   S.rootNode = null;
   loadGames();
   await loadBiggest();
-  await openNode(S.node ? S.node.id : S.rootId, null);
-  if (S.gnode) openGameNode(S.gnode.id);
+  if (k) {
+    S.bfocus = rowAt(S.biggest.map((x) => ({ name: x.path })), k.brow);
+    S.bscroll = k.brow.scroll;
+    clampList('bfocus', 'bscroll', S.biggest.length);
+  }
+  if (k && k.path) await reopenAt(S.rootId, k.path, k.row, k.up, openNode);
+  else await openNode(S.node ? S.node.id : S.rootId, null);
+  // The game folder keeps its id; it is gone when the games count drops it.
+  if (k && k.gpath && S.gpart) await reopenAt(S.gpart.id, k.gpath, k.grow, k.up, openGameNode);
+  else if (S.gnode) openGameNode(S.gnode.id);
 }
 
 // Another device scanned again since this one selected: the ids on screen name
@@ -1257,6 +1324,14 @@ function closeDialog(choice) {
 }
 
 let hold = null;
+// The PS5 browser turns a Cross release into a click: after a finished hold
+// that click would land on whatever screen comes next.
+let holdFinished = false;
+function releaseHold() {
+  if (!holdFinished) return;
+  holdFinished = false;
+  clickSuppressUntil = performance.now() + 400;
+}
 function startHold(src) {
   const d = S.dialog;
   if (!d || d.hold < 0 || d.focus !== d.hold || hold) return;
@@ -1280,6 +1355,8 @@ function tickHold() {
   if (f) f.style.width = (p * 100) + '%';
   if (p < 1) { requestAnimationFrame(tickHold); return; }
   hold.done = true;
+  holdFinished = true;
+  clickSuppressUntil = performance.now() + 10000;  // until Cross is let go
   const d = S.dialog;
   setTimeout(() => { if (S.dialog === d) closeDialog(d.hold); }, 150);  // show it full first
 }
@@ -1646,7 +1723,7 @@ document.addEventListener('keyup', (e) => {
   const a = KEYS[e.key] || KEYCODES[e.keyCode];
   if (!a) return;
   e.preventDefault();
-  if (a === 'confirm') endHold('key');
+  if (a === 'confirm') { endHold('key'); releaseHold(); }
 });
 
 let lastPointer = { x: -1, y: -1 };
@@ -1684,7 +1761,7 @@ const pointerDown = (e) => {
     startHold('ptr');
   }
 };
-const pointerUp = () => endHold('ptr');
+const pointerUp = () => { endHold('ptr'); releaseHold(); };
 document.addEventListener('mousedown', pointerDown);
 document.addEventListener('mouseup', pointerUp);
 document.addEventListener('touchstart', pointerDown, { passive: true });
@@ -1744,7 +1821,7 @@ function pollPad(t) {
       const down = b.pressed || b.value > 0.5, was = padPrev[i];
       if (down && !was) { padNext[i] = t + 380; padPress(a); }
       else if (down && REPEATS.has(a) && t >= padNext[i]) { padNext[i] = t + 65; input(a, 'pad'); }
-      else if (!down && was && a === 'confirm') endHold('pad');
+      else if (!down && was && a === 'confirm') { endHold('pad'); releaseHold(); }
       padPrev[i] = down;
     });
     // Right stick: scroll, faster the further it is pushed.
