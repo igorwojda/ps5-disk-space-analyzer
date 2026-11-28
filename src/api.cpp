@@ -2,6 +2,7 @@
 #include "api.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <map>
@@ -77,6 +78,25 @@ State g;
 std::string g_web_dir;
 std::vector<std::string> g_extra;  // extra folders offered as storages
 unsigned short g_port = 0;
+
+// Remote Management: other devices on the network may use the app. On by
+// default; turning it off leaves a marker file, so it stays off after a restart.
+#if defined(__PROSPERO__)
+const char* const kRemoteOffFile = "/data/disk-space-analyzer/remote-off";
+#else
+const char* const kRemoteOffFile = nullptr;  // computer: for this run only
+#endif
+std::atomic<bool> g_remote{true};
+
+void SetRemote(bool on) {
+  g_remote = on;
+  if (!kRemoteOffFile) return;
+  if (on) {
+    unlink(kRemoteOffFile);
+  } else if (FILE* f = std::fopen(kRemoteOffFile, "w")) {
+    std::fclose(f);
+  }
+}
 
 // ---------------------------------------------------------------- json
 
@@ -775,10 +795,29 @@ void ApiInit(const std::string& web_dir, const std::vector<std::string>& extra, 
   g_web_dir = web_dir;
   g_extra = extra;
   g_port = port;
+  struct stat st;
+  if (kRemoteOffFile && stat(kRemoteOffFile, &st) == 0) g_remote = false;
+  Log("remote management %s", g_remote ? "on" : "off");
 }
 
 void ApiHandle(const Request& req, Response& res) {
   const std::string& p = req.path;
+  // From the PS5 itself: loopback, or its own LAN address. Unknown counts as remote.
+  bool local = !req.peer_ip.empty() && (IsLoopback(req.peer_ip) || req.peer_ip == req.local_ip);
+  if (!local && !g_remote) {
+    if (p.compare(0, 5, "/api/") == 0) {
+      Error(res, 403, "Remote Management is turned off");
+    } else {
+      res.status = 403;
+      res.type = "text/html; charset=utf-8";
+      res.body = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\">"
+                 "<title>Disk Space Analyzer</title>"
+                 "<body style=\"font:20px sans-serif;background:#081d36;color:#dfe7f2;padding:2em\">"
+                 "<h1>Remote Management is off</h1>"
+                 "<p>Turn it on in Disk Space Analyzer on the PS5: Settings, Remote Management.</p>";
+    }
+    return;
+  }
   if (p.compare(0, 5, "/api/") != 0) {
     Static(req, res);
     return;
@@ -799,7 +838,21 @@ void ApiHandle(const Request& req, Response& res) {
     // A request from another device arrived on the LAN address already. The
     // PS5 browser uses 127.0.0.1, so ask the routing table instead.
     std::string ip = IsLoopback(req.local_ip) ? LanAddress() : req.local_ip;
-    Json(res, 200, "{\"version\":" + Str(APP_VERSION) + ",\"ip\":" + Str(ip) + ",\"port\":" + Num(g_port) + "}");
+    Json(res, 200, "{\"version\":" + Str(APP_VERSION) + ",\"ip\":" + Str(ip) + ",\"port\":" + Num(g_port) +
+                      ",\"remote\":" + (g_remote ? "true" : "false") + "}");
+    return;
+  }
+
+  if (p == "/api/remote" && req.method == "POST") {
+    // Only the console may change who else gets in.
+    if (!local) {
+      Error(res, 403, "Remote Management can only be changed on the PS5");
+      return;
+    }
+    auto it = req.query.find("on");
+    SetRemote(it != req.query.end() && it->second == "1");
+    Log("remote management %s", g_remote ? "on" : "off");
+    Json(res, 200, std::string("{\"remote\":") + (g_remote ? "true" : "false") + "}");
     return;
   }
 

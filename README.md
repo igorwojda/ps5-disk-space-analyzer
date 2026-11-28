@@ -53,7 +53,8 @@ The app runs until you restart the console. After a restart, send the file
 again (or add it to your autoload). The Media tile stays installed.
 
 To use it from your phone or PC, open the **Remote Management** address shown
-at the bottom of the app, such as `http://192.168.1.20:8833/`.
+at the bottom of the app, such as `http://192.168.1.20:8833/`. To keep other
+devices out, turn off Remote Management in Settings on the PS5.
 
 ## Build from source
 

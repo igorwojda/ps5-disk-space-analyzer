@@ -153,6 +153,11 @@ static void* Connection(void* arg) {
   if (getsockname(fd, (sockaddr*)&local, &local_len) == 0 && local.sin_family == AF_INET &&
       inet_ntop(AF_INET, &local.sin_addr, ip, sizeof ip))
     req.local_ip = ip;
+  sockaddr_in peer{};
+  socklen_t peer_len = sizeof peer;
+  if (getpeername(fd, (sockaddr*)&peer, &peer_len) == 0 && peer.sin_family == AF_INET &&
+      inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof ip))
+    req.peer_ip = ip;
   if (header_end == std::string::npos) {
     close(fd);
     return nullptr;

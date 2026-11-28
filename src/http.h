@@ -14,6 +14,7 @@ struct Request {
   std::map<std::string, std::string> headers;  // names in lower case
   std::string body;
   std::string local_ip;  // our address on the connection the request came in on
+  std::string peer_ip;   // the client's address
 };
 
 struct Response {

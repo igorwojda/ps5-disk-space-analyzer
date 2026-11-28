@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The JSON API and static files behind the web UI.
 //
-//   GET  /api/info                app version, LAN address and port
+//   GET  /api/info                app version, LAN address, port, remote on/off
+//   POST /api/remote?on=1|0       allow other devices (from the PS5 itself only)
 //   GET  /api/storages            storages with free/total
 //   POST /api/scan?path=P         start scanning P (replaces the last scan)
 //   POST /api/cancel              cancel the running scan

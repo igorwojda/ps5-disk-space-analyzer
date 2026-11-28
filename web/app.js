@@ -97,7 +97,11 @@ const GLYPH = {
 // The console's own browser.
 const ON_PS5 = /PlayStation/i.test(navigator.userAgent);
 
-// Kept in this browser's localStorage, so each device has its own.
+// The page was opened on the PS5 itself (the tile opens 127.0.0.1), not from another device.
+const LOCAL = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+
+// Kept in this browser's localStorage, so each device has its own. server: kept
+// by the payload instead, shared by every device, changed only on the PS5.
 const SETTINGS = [
   { key: 'fullscreen', label: 'Full screen', values: [false, true], def: false, ps5: true,
     show: (v) => (v ? 'On' : 'Off') },
@@ -105,17 +109,22 @@ const SETTINGS = [
     show: (v) => Math.round(v * 100) + '%' },
   { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
     show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
-].filter((d) => !d.ps5 || ON_PS5);
+  { key: 'remote', label: 'Remote Management', values: [false, true], def: true, server: true, local: true,
+    show: (v) => (v ? 'On' : 'Off') },
+].filter((d) => (!d.ps5 || ON_PS5) && (!d.local || LOCAL));
 const SETTINGS_KEY = 'dsa.settings';
 const settings = {};
 
 function loadSettings() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { /* no storage */ }
-  for (const d of SETTINGS) settings[d.key] = d.values.includes(saved[d.key]) ? saved[d.key] : d.def;
+  for (const d of SETTINGS)  // server ones: the default until /api/info answers
+    settings[d.key] = !d.server && d.values.includes(saved[d.key]) ? saved[d.key] : d.def;
 }
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* no storage */ }
+  const own = {};
+  for (const d of SETTINGS) if (!d.server) own[d.key] = settings[d.key];
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(own)); } catch (e) { /* no storage */ }
 }
 
 const ROWS_H = 714, ROW_GAP = 6, ROWS_END = 928;
@@ -159,11 +168,28 @@ function stepSetting(i, dir) {
   const d = SETTINGS[i];
   const k = d.values.indexOf(settings[d.key]) + dir;
   if (k < 0 || k >= d.values.length) return;
+  if (d.server) { setServerSetting(d, d.values[k]); return; }
   settings[d.key] = d.values[k];
   saveSettings();
   applySettings();
   render();
   if (d.key === 'fullscreen') applyFullscreen(false);
+}
+
+// Shown at once, taken back if the payload refuses.
+async function setServerSetting(d, v) {
+  const old = settings[d.key];
+  settings[d.key] = v;
+  render();
+  try {
+    const r = await api(`/api/${d.key}?on=${v ? 1 : 0}`, 'POST');
+    settings[d.key] = r[d.key];
+  } catch (e) {
+    settings[d.key] = old;
+    toast('Could not change ' + d.label + ': ' + e.message);
+  }
+  renderStatus();
+  render();
 }
 
 // ================================================================ full screen
@@ -2282,7 +2308,8 @@ function settingsHtml(d) {
   }).join('');
   const close = d.focus === SETTINGS.length;
   return `<div class="dlg"><h2>Settings</h2>${rows}
-    <p class="set-preview">Changes apply right away and are saved on this device.</p>
+    <p class="set-preview">Changes apply right away and are saved on this device${
+      LOCAL ? '. Remote Management lets phones and computers on your network open the app' : ''}.</p>
     <div class="btns one"><div class="btn${close ? ' focus' : ''}" data-act="dlg" data-i="0"><span>Close</span></div></div></div>`;
 }
 
@@ -2303,13 +2330,24 @@ async function loadInfo() {
   let info;
   try { info = await api('/api/info'); } catch (e) { return; }
   appVersion = info.version || '';
-  const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
-  const host = info.ip || (local ? '' : location.hostname);
+  serverInfo = info;
+  settings.remote = info.remote !== false;
+  renderStatus();
+  if (S.dialog && S.dialog.settings) render();
+}
+
+let serverInfo = null;  // last /api/info
+
+function renderStatus() {
+  const info = serverInfo;
+  if (!info) return;
+  const host = info.ip || (LOCAL ? '' : location.hostname);
   const port = info.port || location.port;
   const url = host ? `http://${host}:${port}/` : `http://&lt;PS5 IP&gt;:${port}/`;
   // The PS5 tile opens 127.0.0.1; any other device already is "in a browser".
+  const remote = settings.remote ? `<b>${host ? esc(url) : url}</b>` : '<b>Off</b>';
   $('#statusbar').innerHTML = `<span><b>v${esc(info.version)}</b></span>` +
-    (local ? `<span>Remote Management: <b>${host ? esc(url) : url}</b></span>` : '');
+    (LOCAL ? `<span>Remote Management: ${remote}</span>` : '');
 }
 
 // ================================================================ layout + start
