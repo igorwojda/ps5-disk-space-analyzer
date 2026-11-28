@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(disk-space-analyzer VERSION 1.0.0 LANGUAGES C CXX)
 # -DAPP_VERSION=... overrides it, e.g. to try the update on an older version.
 if(NOT APP_VERSION)
-  set(APP_VERSION "${PROJECT_VERSION}-beta9")
+  set(APP_VERSION "${PROJECT_VERSION}-beta10")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
