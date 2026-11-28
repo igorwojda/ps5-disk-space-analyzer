@@ -12,3 +12,5 @@ struct Asset {
 };
 
 const Asset* FindAsset(const char* path);
+// The i-th file, or nullptr past the last one.
+const Asset* AssetAt(size_t i);

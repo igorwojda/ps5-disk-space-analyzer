@@ -8,6 +8,9 @@
 // Browse has up to four tabs: Folders, Biggest Files, Games and Apps (each
 // title's folders on every volume, added up). Games and Apps show only when the
 // scanned storage holds a folder of one.
+// Opened while the payload is not running, the page comes from the browser's
+// application cache (index.html's manifest) and shows the offline screen,
+// which reloads by itself once the payload answers.
 // When GitHub has a newer release, home shows an Update button (also first in
 // the Options menu): the server downloads it and the new version replaces this
 // one (updating screen), then the page reloads.
@@ -1970,7 +1973,7 @@ document.addEventListener('wheel', (e) => {
 // leaving the page. On home there is none: Circle is left to the browser, and
 // the PS5 closes the app as it does for other browser apps.
 let stepping = false;
-const homeIdle = () => S.screen === 'home' && !S.dialog;
+const homeIdle = () => (S.screen === 'home' || S.screen === 'offline') && !S.dialog;
 function syncHistory() {
   if (stepping) return;
   const spare = history.state && history.state.g === 1;
@@ -2121,6 +2124,7 @@ function render() {
     case 'moving': [html, hints] = renderProgress('move'); break;
     case 'reporting': [html, hints] = renderProgress('report'); break;
     case 'updating': [html, hints] = renderUpdating(); break;
+    case 'offline': [html, hints] = renderOffline(); break;
     case 'browse': [html, hints] = renderBrowse(); break;
     case 'review': [html, hints] = renderReview(); break;
     default: break;
@@ -2629,6 +2633,7 @@ function fit() {
 window.addEventListener('resize', fit);
 
 async function start() {
+  if (!(await reachServer())) return;
   await loadSettings();
   applySettings();
   fit();
@@ -2679,5 +2684,30 @@ async function start() {
     render();
   }
 }
+// The page came from the application cache and nobody answers: the payload is
+// not running (or, on another device, Remote Management is off). Say so, and
+// reload once it answers.
+async function reachServer() {
+  try { await api('/api/info'); return true; } catch (e) { S.offline = e.status === 403 ? 'remote' : 'down'; }
+  S.screen = 'offline';
+  fit();
+  render();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try { await api('/api/info'); location.reload(); return false; } catch (e) { /* still down */ }
+  }
+}
+
+function renderOffline() {
+  const [title, line] = S.offline === 'remote'
+    ? ['Remote Management is off', 'Turn it on in Disk Space Analyzer on the PS5: Settings, Remote Management.']
+    : ['Disk Space Analyzer is not running', 'Send disk-space-analyzer.elf to the ELF loader on your PS5 (port 9021), or load it with your payload manager.'];
+  return [`<div class="abs offline"><div class="face">:(</div><h2>${esc(title)}</h2><p>${esc(line)}</p></div>`,
+          '<div class="muted">This screen opens the app by itself once it starts.</div>'];
+}
+
+// A new version's files arrived in the application cache: load them.
+if (window.applicationCache) window.applicationCache.addEventListener('updateready', () => location.reload());
+
 // After start: resuming a drive closes any dialog open by then.
 start().finally(askFullscreen);

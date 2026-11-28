@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <map>
 #include <cstdlib>
@@ -736,6 +737,31 @@ void Static(const Request& req, Response& res) {
   res.size = a->size;
 }
 
+// HTML5 application cache: the PS5 browser keeps the page and its files, so
+// opening the tile while the payload is not running shows app.js's "not
+// running" screen instead of the browser's network error. The comment holds a
+// hash of every built-in file: any change to the UI makes the browser fetch it
+// again. In development (web folder) there is none, so nothing is cached.
+void AppCache(Response& res) {
+  if (!g_web_dir.empty()) {
+    Error(res, 404, "not found");
+    return;
+  }
+  static const std::string manifest = [] {
+    uint64_t h = 1469598103934665603ULL;  // FNV-1a
+    for (size_t i = 0; const Asset* a = AssetAt(i); i++)
+      for (size_t k = 0; k < a->size; k++) h = (h ^ a->data[k]) * 1099511628211ULL;
+    char tag[17];
+    std::snprintf(tag, sizeof tag, "%016llx", (unsigned long long)h);
+    return std::string("CACHE MANIFEST\n# " APP_VERSION " ") + tag +
+           "\nCACHE:\n/app.css\n/app.js\n/icon0.png\n/fonts/Lato-Regular.ttf\n/fonts/Lato-Bold.ttf\n"
+           "NETWORK:\n*\n";
+  }();
+  res.type = "text/cache-manifest";
+  res.cache = "no-cache";
+  res.body = manifest;
+}
+
 // A web file's text: from the web folder in development, else built in.
 std::string AssetText(const std::string& p) {
   if (!g_web_dir.empty()) {
@@ -835,6 +861,10 @@ void ApiHandle(const Request& req, Response& res) {
                  "<h1>Remote Management is off</h1>"
                  "<p>Turn it on in Disk Space Analyzer on the PS5: Settings, Remote Management.</p>";
     }
+    return;
+  }
+  if (p == "/app.appcache") {
+    AppCache(res);
     return;
   }
   if (p.compare(0, 5, "/api/") != 0) {

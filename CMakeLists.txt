@@ -64,6 +64,11 @@ file(APPEND ${GEN}/web_assets_table.cpp.in
   "    if (!std::strcmp(g_assets[i].path, path)) return &g_assets[i];\n"
   "  }\n"
   "  return nullptr;\n"
+  "}\n"
+  "const Asset* AssetAt(size_t i) {\n"
+  "  if (i >= sizeof g_assets / sizeof g_assets[0]) return nullptr;\n"
+  "  g_assets[i].size = *g_lens[i];\n"
+  "  return &g_assets[i];\n"
   "}\n")
 configure_file(${GEN}/web_assets_table.cpp.in ${GEN}/web_assets_table.cpp COPYONLY)
 

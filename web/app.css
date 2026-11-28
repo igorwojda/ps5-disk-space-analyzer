@@ -246,6 +246,12 @@ svg { display: block; }
 .spin-label { left: 0; width: 1920px; top: 375px; text-align: center; font-size: calc(40px * var(--fs)); font-weight: 700; }
 .big-label { left: 0; width: 1920px; top: 590px; text-align: center; font-size: calc(48px * var(--fs)); font-weight: 700; }
 .mid-label { left: 0; width: 1920px; top: calc(590px + 74px * var(--fs)); text-align: center; font-size: calc(30px * var(--fs)); color: var(--dim); }
+/* ---------------------------------------------------------------- offline (from the application cache) */
+.offline { left: 410px; top: 250px; width: 1100px; padding: 56px 70px 64px; border-radius: 28px; text-align: center;
+  background: var(--dlg-bg); box-shadow: 0 0 0 2px rgba(255, 255, 255, .16); }
+.offline .face { font-size: 130px; font-weight: 700; color: var(--dim); line-height: 1; margin-bottom: 44px; }
+.offline h2 { margin: 0 0 20px; font-size: calc(44px * var(--fs)); }
+.offline p { margin: 0; font-size: calc(30px * var(--fs)); color: var(--dim); line-height: 1.4; }
 .path-label { left: 260px; width: 1400px; top: 760px; text-align: center; font-size: calc(24px * var(--fs)); color: var(--faint); }
 .progress { left: 510px; top: 714px; width: 900px; height: 14px; border-radius: 7px; background: rgba(255, 255, 255, .12); overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--danger); min-width: 14px; transition: width .2s; }
