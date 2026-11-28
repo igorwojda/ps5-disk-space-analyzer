@@ -32,6 +32,10 @@ up space, so you can choose what to remove.
 - 🖥️ **Full screen on the PS5:** turn on Full screen in Settings and the
   app switches the console's browser to full screen whenever it opens. Turn
   it off to get the browser's normal window back.
+- ⬆️ **Updates in one click:** each time you open the app or come back to it,
+  it checks GitHub for a new version and shows an **Update** card above the
+  storages. The app downloads the newest version, hands it to the ELF loader
+  (port 9021) and reopens running it.
 - 📱 **Use your phone or PC:** the same app opens in any browser on your home
   network.
 
@@ -52,13 +56,17 @@ You need a jailbroken PS5 with an ELF loader.
 The app runs until you restart the console. After a restart, send the file
 again (or add it to your autoload). The Media tile stays installed.
 
+**Update** replaces the running copy only: if you autoload the app, put the new
+`.elf` in your autoload folder too, or it starts the old version after a restart.
+
 To use it from your phone or PC, open the **Remote Management** address shown
 at the bottom of the app, such as `http://192.168.1.20:8833/`. To keep other
 devices out, turn off Remote Management in Settings on the PS5.
 
 ## Build from source
 
-Needs `cmake`, `clang` and `lld`. On macOS: `brew install llvm lld cmake`.
+Needs `cmake`, `clang` and `lld` (and libcurl for `make run`; macOS has it). On
+macOS: `brew install llvm lld cmake`.
 
 ```sh
 git submodule update --init # fetch vendor/browser-fullscreen

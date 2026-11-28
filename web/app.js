@@ -8,6 +8,9 @@
 // Browse has up to four tabs: Folders, Biggest Files, Games and Apps (each
 // title's folders on every volume, added up). Games and Apps show only when the
 // scanned storage holds a folder of one.
+// When GitHub has a newer release, home shows an Update button (also first in
+// the Options menu): the server downloads it and the new version replaces this
+// one (updating screen), then the page reloads.
 //
 // Input, all mapped to the same actions:
 //   D-pad / arrow keys      move focus          Cross / Enter      open, confirm
@@ -68,6 +71,7 @@ const ICON = {
   gear: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.2h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.2 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>',
   report: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 18h2v-5H9zm3.5 0h2v-8h-2zm3.5 0h2v-3h-2z" fill-rule="evenodd"/></svg>',
   info: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm-1.3 8h2.6v8h-2.6zm1.3-4.6a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2z"/></svg>',
+  update: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M10.5 3h3v8.2l3.1-3.1 2.1 2.1L12 16.9l-6.7-6.7 2.1-2.1 3.1 3.1zM4 18.5h16V21H4z"/></svg>',
   rescan: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M21.5 2.5v8h-8z" fill="currentColor"/></svg>',
   partial: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="#2fbf55" stroke-width="2.5"/><rect x="8" y="13" width="14" height="4" rx="2" fill="#2fbf55"/></svg>',
 };
@@ -258,6 +262,7 @@ const S = {
   reportBack: 'home', // screen to return to once the report is made
   resultSeq: 0,
   scanSeq: 0,         // the server's scan the node ids on screen belong to
+  update: null,       // GET /api/update: a newer release, and progress while installing it
 };
 
 // Review screen buttons: Cut, Move to and Clear side by side, Delete below.
@@ -1269,7 +1274,9 @@ function openMenu() {
 }
 
 function openHomeMenu() {
-  const items = [['Refresh storage list', () => loadStorages().then(() => { render(); toast('Storage list refreshed'); })]];
+  const items = [];
+  if (updateReady()) items.push([`Update to v${S.update.latest}`, askUpdate]);
+  items.push(['Refresh storage list', () => loadStorages().then(() => { render(); toast('Storage list refreshed'); })]);
   const f = S.storages[S.hfocus];
   items.push(['Export Report', () => openExport(f ? f.path : '')]);
   if (S.clip) items.push([`Cancel ${S.clipMode === 'move' ? 'move' : 'cut'} (${fmtCount(S.clip.length)} items)`, cancelCut]);
@@ -1294,6 +1301,113 @@ function leaveScan() {
     buttons: ['Stay', 'Leave'], cancel: 0,
     onChoose: (i) => { if (i === 1) go(); },
   });
+}
+
+// ================================================================ update
+
+// A newer release on GitHub. The server checks when asked and keeps the answer.
+const updateReady = () => !!S.update && (S.update.state === 'available' || S.update.state === 'failed');
+
+// Asks for a fresh check (the server skips it when the last one is under a
+// minute old) and follows it until it ends. A known update stays shown meanwhile.
+let updateLoading = false;
+async function loadUpdate() {
+  if (updateLoading) return;
+  updateLoading = true;
+  try {
+    let path = '/api/update?check=1';
+    for (let i = 0; i < 20; i++) {
+      let u;
+      try { u = await api(path); } catch (e) { return; }
+      path = '/api/update';
+      if (S.screen === 'updating') return;
+      const was = updateReady() ? S.update.latest : '';
+      if (u.state !== 'checking') S.update = u;
+      if ((updateReady() ? S.update.latest : '') !== was && S.screen === 'home') render();
+      if (!u.checking && u.state !== 'checking') return;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  } finally {
+    updateLoading = false;
+  }
+}
+
+// Check again each time the app is brought back (PS button, then the app).
+let updateAsked = 0;
+function updateOnRestore() {
+  if (document.visibilityState === 'hidden' || Date.now() - updateAsked < 5000) return;
+  updateAsked = Date.now();
+  loadUpdate();
+}
+document.addEventListener('visibilitychange', updateOnRestore);
+window.addEventListener('focus', updateOnRestore);
+window.addEventListener('pageshow', (e) => { if (e.persisted) updateOnRestore(); });
+
+function askUpdate() {
+  const u = S.update;
+  showDialog({
+    title: `Update to v${u.latest}?`,
+    lines: [`You have v${u.current}. The newest version is downloaded from GitHub and starts in place of this one.`,
+            'It takes a few seconds. A running scan is lost; your settings stay.'],
+    buttons: ['Not now', 'Update'], cancel: 0, focus: 1,
+    onChoose: (i) => { if (i === 1) runUpdate(); },
+  });
+}
+
+async function runUpdate() {
+  try { await api('/api/update/install', 'POST'); } catch (e) {
+    showDialog({ title: 'Could not update', lines: [e.message] });
+    return;
+  }
+  S.update = Object.assign({}, S.update, { state: 'downloading', got: 0, error: '' });
+  S.screen = 'updating';
+  render();
+  pollUpdate();
+}
+
+async function pollUpdate() {
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 400));
+    let u;
+    // No answer: the new version has already stopped this one.
+    try { u = await api('/api/update'); } catch (e) { u = Object.assign({}, S.update, { state: 'restarting' }); }
+    S.update = u;
+    if (u.state === 'failed') {
+      S.screen = 'home';
+      showDialog({ title: 'Update failed', lines: [u.error || 'Unknown error', 'You can try again, or send the new .elf to the ELF loader yourself.'] });
+      return;
+    }
+    render();
+    if (u.state === 'restarting') { waitForRestart(u.current); return; }
+  }
+}
+
+// Reload once the new version answers in place of the old one.
+async function waitForRestart(old) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const info = await api('/api/info');
+      if (info.version !== old) { location.reload(); return; }
+    } catch (e) { /* restarting */ }
+  }
+  S.screen = 'home';
+  showDialog({ title: 'The new version did not start',
+               lines: ['Send disk-space-analyzer.elf to the ELF loader (port 9021) to start it by hand.'] });
+}
+
+function renderUpdating() {
+  const u = S.update || {};
+  const frac = u.size ? Math.min(1, (u.got || 0) / u.size) : 0;
+  const label = u.state === 'downloading' ? `Downloading ${fmtSize(u.got || 0)} of ${fmtSize(u.size || 0)}`
+    : u.state === 'installing' ? 'Starting the new version' : 'Restarting';
+  const h = `<div class="abs spinner"></div>
+    <div class="abs spin-label">${u.state === 'downloading' ? fmtPct(frac) : ''}</div>
+    <div class="abs big-label">Updating to v${esc(u.latest || '')}&hellip;</div>
+    <div class="abs mid-label">${label}&hellip;</div>
+    <div class="abs progress"><i class="move" style="width:${((u.state === 'downloading' ? frac : 1) * 100).toFixed(1)}%"></i></div>`;
+  return [h, '<div class="muted">The app reopens by itself in a few seconds.</div>'];
 }
 
 function stopPayload() {
@@ -1422,9 +1536,15 @@ function input(a, src) {
   }
 }
 
+// Home focus: a storage card, or -1 for the update card above them.
 function homeInput(a) {
   const n = S.storages.length;
-  if (a === 'up' && S.hfocus >= 2) S.hfocus -= 2;
+  if (S.hfocus < 0 && !updateReady()) S.hfocus = 0;
+  if (S.hfocus < 0) {
+    if (a === 'down' && n) S.hfocus = 0;
+    else if (a === 'confirm') { askUpdate(); return; }
+  } else if (a === 'up' && S.hfocus >= 2) S.hfocus -= 2;
+  else if (a === 'up' && updateReady()) S.hfocus = -1;
   else if (a === 'down') {
     if (S.hfocus + 2 < n) S.hfocus += 2;
     else if (S.hfocus % 2 === 0 && S.hfocus + 1 < n) S.hfocus += 1;
@@ -1571,6 +1691,7 @@ function act(el) {
   const k = el.dataset.act, i = Number(el.dataset.i);
   switch (k) {
     case 'storage': S.hfocus = i; startScan(S.storages[i]); break;
+    case 'update': S.hfocus = -1; askUpdate(); break;
     case 'tab': setTab(i); S.hover = null; render(); break;
     case 'crumb': S.tab = 0; openNode(i); break;
     case 'check': {
@@ -1644,6 +1765,7 @@ function hover(el) {
   let i = Number(el.dataset.i);
   let changed = false;
   if (k === 'storage' && S.hfocus !== i) { S.hfocus = i; changed = true; }
+  if (k === 'update' && S.hfocus !== -1) { S.hfocus = -1; changed = true; }
   if ((k === 'row' || k === 'check') && S.screen === 'browse' && S.mfocus >= 0) { S.mfocus = -1; changed = true; }
   if (k === 'mbtn' && S.mfocus !== i) { S.mfocus = i; changed = true; }
   if (k === 'row' || k === 'check') {
@@ -1935,6 +2057,7 @@ function render() {
     case 'deleting': [html, hints] = renderProgress('delete'); break;
     case 'moving': [html, hints] = renderProgress('move'); break;
     case 'reporting': [html, hints] = renderProgress('report'); break;
+    case 'updating': [html, hints] = renderUpdating(); break;
     case 'browse': [html, hints] = renderBrowse(); break;
     case 'review': [html, hints] = renderReview(); break;
     default: break;
@@ -1986,6 +2109,15 @@ function renderHome() {
       <div class="home-btn" data-act="hint" data-a="tabnext">${GLYPH.r1}${ICON.info}<span>About</span></div>
     </div>
     <div class="abs cards">`;
+  const upd = updateReady();
+  if (S.hfocus < 0 && !upd) S.hfocus = 0;
+  if (upd) {
+    h += `<div class="card update${S.hfocus < 0 ? ' focus' : ''}" data-act="update">
+      <div class="ico">${ICON.update}</div>
+      <div class="name ellipsis">Update to v${esc(S.update.latest)}</div>
+      <div class="path ellipsis">${S.update.state === 'failed' ? 'The last try failed. Try again' : `You have v${esc(S.update.current)}`} &middot; downloaded from GitHub</div>
+    </div>`;
+  }
   S.storages.forEach((s, i) => {
     const used = s.total ? 1 - s.free / s.total : 0;
     h += `<div class="card${i === S.hfocus ? ' focus' : ''}" data-act="storage" data-i="${i}">
@@ -1998,7 +2130,7 @@ function renderHome() {
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  let hints = hint('cross', 'Scan', 'confirm') + hint('square', 'Export Report', 'mark') +
+  let hints = hint('cross', S.hfocus < 0 ? 'Update' : 'Scan', 'confirm') + hint('square', 'Export Report', 'mark') +
               hint('triangle', 'Settings', 'review') + hint('r1', 'About', 'tabnext') + hint('circle', 'Close');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
@@ -2443,6 +2575,8 @@ async function start() {
   render();
   applyFullscreen(true);
   loadInfo();
+  updateAsked = Date.now();
+  loadUpdate();
   let st = null;
   try { st = await api('/api/status'); } catch (e) { /* server just started */ }
   await loadStorages();

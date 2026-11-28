@@ -24,6 +24,7 @@
 #include "system.h"
 #include "tree.h"
 #include "uninstall.h"
+#include "update.h"
 #include "web_assets.h"
 
 namespace {
@@ -884,6 +885,15 @@ void ApiHandle(const Request& req, Response& res) {
     return;
   }
 
+  if (p == "/api/update") {
+    auto c = req.query.find("check");
+    UpdateStatus u = GetUpdateStatus(c != req.query.end() && c->second == "1");
+    Json(res, 200, "{\"state\":" + Str(u.state) + ",\"checking\":" + (u.checking ? "true" : "false") + ",\"current\":" + Str(u.current) + ",\"latest\":" +
+                       Str(u.latest) + ",\"got\":" + Num(u.got) + ",\"size\":" + Num(u.size) +
+                       ",\"error\":" + Str(u.error) + "}");
+    return;
+  }
+
   std::lock_guard<std::mutex> lock(g.mu);
   PollLocked();
 
@@ -1162,6 +1172,18 @@ void ApiHandle(const Request& req, Response& res) {
     }
     Log("report saved: %s (%zu bytes)", path.c_str(), html.size());
     Json(res, 200, "{\"ok\":true,\"path\":" + Str(path) + ",\"size\":" + Num(html.size()) + "}");
+  } else if (p == "/api/update/install" && req.method == "POST") {
+    // Restarting mid-delete or mid-move would leave it half done.
+    if (g.phase == Phase::Deleting || g.phase == Phase::Moving) {
+      Error(res, 409, "Wait for the delete or move to finish, then update");
+      return;
+    }
+    std::string err;
+    if (!StartUpdate(&err)) {
+      Error(res, 409, err);
+      return;
+    }
+    Json(res, 200, "{\"ok\":true}");
   } else if (p == "/api/quit" && req.method == "POST") {
     Log("quit requested");
     Json(res, 200, "{\"ok\":true}");

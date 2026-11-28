@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(disk-space-analyzer VERSION 1.0.0 LANGUAGES C CXX)
-set(APP_VERSION "${PROJECT_VERSION}-beta8")
+# -DAPP_VERSION=... overrides it, e.g. to try the update on an older version.
+if(NOT APP_VERSION)
+  set(APP_VERSION "${PROJECT_VERSION}-beta8")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -77,6 +80,7 @@ add_executable(disk-space-analyzer
   src/system.cpp
   src/tree.cpp
   src/uninstall.cpp
+  src/update.cpp
   ${GEN}/web_assets_table.cpp
   ${ASSET_SOURCES}
 )
@@ -113,4 +117,24 @@ if(PS5)
   # logs anything. Same set and order as ps5-web-file-manager.
   target_link_libraries(disk-space-analyzer PRIVATE
     SceIpmi SceAppInstUtil SceUserService SceSystemService kernel_sys)
+
+  # ---- HTTPS for the update check: the toolchain's libcurl and OpenSSL,
+  # with its CA list built in (the console has none a payload can use).
+  set(HB ${PS5_PAYLOAD_SDK}/target/user/homebrew)
+  if(NOT EXISTS ${HB}/lib/libcurl.a OR NOT EXISTS ${HB}/etc/ca-bundle.crt)
+    message(FATAL_ERROR "libcurl not found in ${HB}: run make toolchain")
+  endif()
+  add_custom_command(OUTPUT ${GEN}/ca_bundle.c
+    COMMAND ${CMAKE_COMMAND} -DIN=${HB}/etc/ca-bundle.crt -DOUT=${GEN}/ca_bundle.c -DSYM=ca_bundle
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed.cmake
+    DEPENDS ${HB}/etc/ca-bundle.crt ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed.cmake
+    COMMENT "Embedding ca-bundle.crt")
+  target_sources(disk-space-analyzer PRIVATE ${GEN}/ca_bundle.c)
+  target_include_directories(disk-space-analyzer PRIVATE ${HB}/include)
+  target_link_libraries(disk-space-analyzer PRIVATE
+    ${HB}/lib/libcurl.a ${HB}/lib/libpsl.a ${HB}/lib/libssl.a ${HB}/lib/libcrypto.a
+    ${HB}/lib/libzstd.a ${HB}/lib/libz.a)
+else()
+  find_package(CURL REQUIRED)
+  target_link_libraries(disk-space-analyzer PRIVATE CURL::libcurl)
 endif()

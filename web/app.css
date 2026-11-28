@@ -221,6 +221,12 @@ svg { display: block; }
 .card.focus .bar > i:not(.full) { background: #fff; }
 .card .bar > i { background: #6fb1ff; }
 .card .info { font-size: calc(30px * var(--fs)); color: var(--dim); margin-top: 12px; }
+.card.update { grid-column: 1 / -1; height: auto; min-height: 0; padding-bottom: calc(26px * var(--fs));
+               box-shadow: 0 0 0 2px var(--good); }
+.card.update.focus { box-shadow: 0 0 0 4px var(--focus-ring); }
+.card.update .ico { width: 70px; height: 70px; margin-top: -35px; left: 46px; color: var(--good); }
+.card.update .ico svg { width: 100%; height: 100%; }
+.card.update.focus .ico { color: #fff; }
 
 /* ---------------------------------------------------------------- scanning / deleting */
 .spinner {
