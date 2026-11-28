@@ -80,11 +80,21 @@ bool IsGameTitle(const std::string& id) {
   return IsTitleId(id) && id.compare(0, 4, "NPXS") != 0 && id.compare(0, 4, "NPWR") != 0;
 }
 
-bool IsAppFolder(const ConsoleLayout& l, const std::string& parent) {
-  for (const std::string& b : l.title_bases)
-    if (parent == b + "/app") return true;
-  return false;
+// The title whose folder of this kind ("/app/", "/patch/", ...) `path` is or
+// is inside, on any drive, or "".
+std::string TitleOfKind(const ConsoleLayout& l, const std::string& path, const char* kind) {
+  for (const std::string& b : l.title_bases) {
+    std::string dir = b + kind;
+    if (path.compare(0, dir.size(), dir) != 0) continue;
+    std::string id = path.substr(dir.size(), path.find('/', dir.size()) - dir.size());
+    if (IsGameTitle(id)) return id;
+  }
+  return "";
 }
+
+// The game whose install `path` is or is inside: deleting any of it leaves a
+// game that no longer starts, so the whole game is uninstalled.
+std::string AppTitleOf(const ConsoleLayout& l, const std::string& path) { return TitleOfKind(l, path, "/app/"); }
 
 bool IsPlaydenGames(const ConsoleLayout& l, const std::string& parent) {
   return std::find(l.playden_games.begin(), l.playden_games.end(), parent) != l.playden_games.end();
@@ -217,11 +227,12 @@ DeletePlan PlanDelete(const std::string& raw, const PlaydenTitles& titles) {
     plan.refuse = "This is Playden itself: uninstall it from Playden's settings.";
     return plan;
   }
-  // A title's main folder: uninstalled, never deleted by hand.
-  if (IsAppFolder(l, parent) && IsGameTitle(name)) {
-    plan.uninstall = name;
-    plan.system_removes = SystemFolders(l, name);
-    if (IsPlaydenTitle(name)) plan.also.push_back(l.homebrew + "/" + name);
+  // A title's main folder, or anything in it: uninstalled, never deleted by hand.
+  std::string app = AppTitleOf(l, path);
+  if (!app.empty()) {
+    plan.uninstall = app;
+    plan.system_removes = SystemFolders(l, app);
+    if (IsPlaydenTitle(app)) plan.also.push_back(l.homebrew + "/" + app);
     return plan;
   }
   // The folder a Playden title is installed from.
@@ -319,24 +330,27 @@ bool AskPlaydenToForget(const std::string& game) {
 
 std::string RemovedWithTitle(const std::string& raw) {
   const ConsoleLayout& l = Console();
-  std::string path = Canonical(raw), parent, name;
-  Split(path, &parent, &name);
-  if (!IsGameTitle(name)) return "";
-  for (const std::string& p : SystemFolders(l, name))
-    if (p == path) return name;
+  const std::string path = Canonical(raw);
+  for (const char* kind : {"/app/", "/patch/", "/addcont/", "/appmeta/", "/appmeta/external/"}) {
+    std::string id = TitleOfKind(l, path, kind);
+    if (id.empty()) continue;
+    for (const std::string& p : SystemFolders(l, id))
+      if (HasPrefix(path, p)) return id;
+  }
   return "";
 }
 
 std::string UninstallWarning(const std::string& raw) {
   const ConsoleLayout& l = Console();
   if (l.title_bases.empty()) return "";
+  const std::string path = Canonical(raw);
   std::string parent, name;
-  Split(Canonical(raw), &parent, &name);
-  bool app = IsAppFolder(l, parent) && IsGameTitle(name);
-  if ((app || parent == l.homebrew) && IsPlaydenTitle(name))
+  Split(path, &parent, &name);
+  std::string app = AppTitleOf(l, path);
+  if (IsPlaydenTitle(app) || (parent == l.homebrew && IsPlaydenTitle(name)))
     return "Removes this Playden game's PS5 title through the console. Its files stay, and Playden offers "
            "to finish its setup again.";
-  if (app)
+  if (!app.empty())
     return "Uninstalls the game through the console, as the home screen does: its update and add-ons go too. "
            "Saves stay.";
   if (IsPlaydenGames(l, parent) && !PlaydenInstallId(name).empty())

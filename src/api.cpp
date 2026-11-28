@@ -1033,13 +1033,25 @@ void ApiHandle(const Request& req, Response& res) {
     });
     std::vector<DeletePlan> plans;
     top.clear();
+    // Each title's uninstall counts once, and what it removes anyway (files in
+    // its folders, its update) is not counted again.
     g.delete_bytes = 0;
+    std::vector<std::string> uninstalled;
+    for (const auto& tp : planned) {
+      const std::string& id = tp.second.uninstall;
+      if (id.empty() || std::find(uninstalled.begin(), uninstalled.end(), id) != uninstalled.end()) continue;
+      uninstalled.push_back(id);
+      uint64_t own = 0;
+      for (const auto& other : planned)
+        if (other.second.uninstall == id && RemovedWithTitle(other.first.path) == id) own += other.first.size;
+      g.delete_bytes += std::max(own, tp.second.system_bytes);
+    }
     for (const auto& tp : planned) {
       top.push_back(tp.first);
       plans.push_back(tp.second);
-      const auto& sys = tp.second.system_removes;
-      bool own = std::find(sys.begin(), sys.end(), tp.first.path) != sys.end();
-      g.delete_bytes += own ? std::max(tp.first.size, tp.second.system_bytes) : tp.first.size + tp.second.system_bytes;
+      std::string with = RemovedWithTitle(tp.first.path);
+      bool covered = !with.empty() && std::find(uninstalled.begin(), uninstalled.end(), with) != uninstalled.end();
+      if (!covered) g.delete_bytes += tp.first.size;
       Log("delete: %s%s%s", tp.first.path.c_str(), tp.second.uninstall.empty() ? "" : " (uninstall ",
           tp.second.uninstall.empty() ? "" : (tp.second.uninstall + ")").c_str());
     }

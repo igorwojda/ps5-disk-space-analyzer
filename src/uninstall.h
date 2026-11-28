@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Deleting what the console or Playden keeps a record of.
 //
-// A game's main folder (/user/app/<TITLE ID>) is uninstalled through the
-// system, as the home screen does, so app.db and the home screen forget it;
-// deleting the folder by hand leaves a tile that no longer starts.
+// A game's main folder (/user/app/<TITLE ID>), or anything in it, is
+// uninstalled through the system, as the home screen does, so app.db and the
+// home screen forget it; deleting its files by hand leaves a tile that no
+// longer starts. Its update (/user/patch/<TITLE ID>) is only deleted.
 //
 // Playden (github.com/leolobato/playden-ps5) runs Windows games, each as its
 // own PS5 title FAKE78xxx registered from /data/homebrew/FAKE78xxx, with the
@@ -77,7 +78,7 @@ std::string UninstallTitle(const std::string& id);
 bool AskPlaydenToForget(const std::string& game);
 
 // The title whose uninstall removes `path` (its app, update, add-on or home
-// screen folder), or "".
+// screen folder, or something in one), or "".
 std::string RemovedWithTitle(const std::string& path);
 
 // Non-empty when deleting `path` uninstalls a title or tells Playden.
