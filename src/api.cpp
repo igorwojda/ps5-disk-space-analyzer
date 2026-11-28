@@ -1017,6 +1017,17 @@ void ApiHandle(const Request& req, Response& res) {
   } else if (p == "/api/cancel" && req.method == "POST") {
     if (g.scanner) g.scanner->Cancel();
     Json(res, 200, "{\"ok\":true}");
+  } else if (p == "/api/forget" && req.method == "POST") {
+    // Back on Home: the scan is dropped, so reopening the app stays on Home.
+    if (g.phase == Phase::Ready) {
+      delete g.root;
+      g.root = nullptr;
+      g.index.Clear();
+      g.biggest.clear();
+      g.phase = Phase::Idle;
+      Log("scan forgotten");
+    }
+    Json(res, 200, "{\"ok\":true}");
   } else if (p == "/api/node") {
     if (!g.root) {
       Error(res, 404, "no scan");

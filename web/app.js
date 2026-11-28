@@ -525,7 +525,7 @@ async function pollScan() {
   const place = restorePlace;
   restorePlace = null;
   if (st.phase === 'ready' && (!scanCancelled || place)) await enterBrowse(st, place);
-  else { S.screen = 'home'; await loadStorages(); render(); }
+  else { S.screen = 'home'; await forgetScan(); await loadStorages(); render(); }
 }
 
 async function enterBrowse(st, place) {
@@ -1333,9 +1333,16 @@ function openHomeMenu() {
   });
 }
 
+// Home holds no scan: drop it on the server too, or reopening the app (or
+// coming back to it) would resume it.
+async function forgetScan() {
+  try { localStorage.removeItem(PLACE_KEY); } catch (e) { /* no storage */ }
+  try { await api('/api/forget', 'POST'); } catch (e) { /* server gone: nothing to resume either */ }
+}
+
 function leaveScan() {
   // Cut items stay: they can be pasted on another storage.
-  const go = async () => { S.screen = 'home'; S.marked.clear(); await loadStorages(); render(); };
+  const go = async () => { S.screen = 'home'; S.marked.clear(); await forgetScan(); await loadStorages(); render(); };
   const n = S.marked.size;
   if (!n) { go(); return; }
   showDialog({
