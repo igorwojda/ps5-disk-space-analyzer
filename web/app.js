@@ -67,6 +67,7 @@ const ICON = {
   checked: '<svg viewBox="0 0 30 30"><rect width="30" height="30" rx="7" fill="#2fbf55"/><path d="M7 15.5l5.5 5.5L23.5 9" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   gear: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.2h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.2 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>',
   report: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 18h2v-5H9zm3.5 0h2v-8h-2zm3.5 0h2v-3h-2z" fill-rule="evenodd"/></svg>',
+  info: '<svg class="gear" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm-1.3 8h2.6v8h-2.6zm1.3-4.6a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2z"/></svg>',
   rescan: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M21.5 2.5v8h-8z" fill="currentColor"/></svg>',
   partial: '<svg viewBox="0 0 30 30"><rect x="1.5" y="1.5" width="27" height="27" rx="6.5" fill="none" stroke="#2fbf55" stroke-width="2.5"/><rect x="8" y="13" width="14" height="4" rx="2" fill="#2fbf55"/></svg>',
 };
@@ -141,6 +142,8 @@ function applySettings() {
   GVIS = Math.floor((LIST_H + ROW_GAP) / (gameH + ROW_GAP));
   RVIS = Math.floor((ROWS_H + ROW_GAP) / (rowH + ROW_GAP));
   root.dataset.theme = settings.theme;
+  // From 140% the home buttons would run into the title: they drop their icons.
+  root.dataset.compact = fs >= 1.4 ? '1' : '';
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = settings.theme === 'blue' ? '#081d36' : '#000000';
   clampList('focus', 'scroll', S.node ? S.node.children.length : 0);
@@ -189,6 +192,18 @@ async function applyFullscreen(auto) {
 
 function openSettings() {
   showDialog({ title: 'Settings', settings: true, buttons: ['Close'], cancel: 0, focus: 0 });
+}
+
+let appVersion = '';  // from /api/info, once the server answers
+
+const ABOUT = [
+  ['Author', 'Igor Wojda'],
+  ['License', 'GPL-3.0-or-later (free software)'],
+  ['Source', 'github.com/igorwojda/ps5-disk-space-analyzer', 'https://github.com/igorwojda/ps5-disk-space-analyzer'],
+];
+
+function openAbout() {
+  showDialog({ title: 'Disk Space Analyzer', about: true, buttons: ['Close'] });
 }
 
 // ================================================================ state
@@ -1149,7 +1164,7 @@ function openMenu() {
                ['Move selected to…', askMoveTo],
                ['Clear selection', clearSelection]);
   }
-  items.push(['Choose another storage', leaveScan], ['Settings', openSettings],
+  items.push(['Choose another storage', leaveScan], ['Settings', openSettings], ['About', openAbout],
              ['Stop Disk Space Analyzer', stopPayload], ['Close', null]);
   showDialog({
     title: 'Menu',
@@ -1165,7 +1180,7 @@ function openHomeMenu() {
   const f = S.storages[S.hfocus];
   items.push(['Export Report', () => openExport(f ? f.path : '')]);
   if (S.clip) items.push([`Cancel ${S.clipMode === 'move' ? 'move' : 'cut'} (${fmtCount(S.clip.length)} items)`, cancelCut]);
-  items.push(['Settings', openSettings], ['Close', null]);
+  items.push(['Settings', openSettings], ['About', openAbout], ['Close', null]);
   showDialog({
     title: 'Menu',
     vertical: true,
@@ -1315,6 +1330,7 @@ function homeInput(a) {
   else if (a === 'confirm' && S.storages[S.hfocus]) { startScan(S.storages[S.hfocus]); return; }
   else if (a === 'menu') { openHomeMenu(); return; }
   else if (a === 'review') { openSettings(); return; }
+  else if (a === 'tabnext') { openAbout(); return; }
   else if (a === 'mark') { openExport(S.storages[S.hfocus] ? S.storages[S.hfocus].path : ''); return; }
   render();
 }
@@ -1620,6 +1636,9 @@ document.addEventListener('mousemove', (e) => {
 let clickSuppressUntil = 0;
 document.addEventListener('click', (e) => {
   if (performance.now() < clickSuppressUntil) return;
+  // A link opens when the pointer clicked it; a Cross press that only lands
+  // on it acts on the focused item instead.
+  if (e.target.closest('a[href]')) { if (S.cursor) return; e.preventDefault(); }
   const el = e.target.closest('[data-act]');
   // D-pad users press Cross wherever the browser's cursor happens to rest:
   // act on the focused item unless the cursor was moved since.
@@ -1861,6 +1880,7 @@ function renderHome() {
     <div class="abs home-actions">
       <div class="home-btn" data-act="hint" data-a="mark">${GLYPH.square}${ICON.report}<span>Export Report</span></div>
       <div class="home-btn" data-act="hint" data-a="review">${GLYPH.triangle}${ICON.gear}<span>Settings</span></div>
+      <div class="home-btn" data-act="hint" data-a="tabnext">${GLYPH.r1}${ICON.info}<span>About</span></div>
     </div>
     <div class="abs cards">`;
   S.storages.forEach((s, i) => {
@@ -1876,7 +1896,7 @@ function renderHome() {
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
   let hints = hint('cross', 'Scan', 'confirm') + hint('square', 'Export Report', 'mark') +
-              hint('triangle', 'Settings', 'review') + hint('circle', 'Close');
+              hint('triangle', 'Settings', 'review') + hint('r1', 'About', 'tabnext') + hint('circle', 'Close');
   if (S.clip) {
     hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
       &middot; scan a storage, open a folder</div></div>`;
@@ -2239,6 +2259,7 @@ function renderDialog() {
   const d = S.dialog;
   if (!d) { box.innerHTML = ''; return; }
   if (d.settings) { box.innerHTML = settingsHtml(d); return; }
+  if (d.about) { box.innerHTML = aboutHtml(d); return; }
   const one = d.buttons.length === 1;
   box.innerHTML = `<div class="dlg"><h2>${esc(d.title)}</h2>
     ${d.lines.map((l) => `<p>${glyphText(l)}</p>`).join('')}
@@ -2265,12 +2286,23 @@ function settingsHtml(d) {
     <div class="btns one"><div class="btn${close ? ' focus' : ''}" data-act="dlg" data-i="0"><span>Close</span></div></div></div>`;
 }
 
+function aboutHtml(d) {
+  const ver = appVersion ? `<span class="ver">v${esc(appVersion)}</span>` : '';
+  const rows = ABOUT.map(([k, v, href]) => `<div class="k">${esc(k)}</div><div class="v">${
+    href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</div>`).join('');
+  return `<div class="dlg about"><h2>${esc(d.title)}${ver}</h2>
+    <p class="tagline">See what fills your PS5 storage and free up space safely.</p>
+    <div class="about-grid">${rows}</div>
+    <div class="btns one"><div class="btn${d.focus === 0 ? ' focus' : ''}" data-act="dlg" data-i="0"><span>Close</span></div></div></div>`;
+}
+
 // ================================================================ status bar
 
 // Version, and the address another device on the network can open.
 async function loadInfo() {
   let info;
   try { info = await api('/api/info'); } catch (e) { return; }
+  appVersion = info.version || '';
   const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
   const host = info.ip || (local ? '' : location.hostname);
   const port = info.port || location.port;
