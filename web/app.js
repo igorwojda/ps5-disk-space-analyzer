@@ -279,7 +279,7 @@ function openAbout() {
 
 const S = {
   screen: 'home',
-  storages: [], hfocus: 0, hbtn: 0,
+  storages: [], hfocus: 0, hbtn: 0, hreveal: false,
   storage: null, rootId: 0, rootNode: null,
   node: null, tab: 0, focus: 0, scroll: 0,
   biggest: [], bfocus: 0, bscroll: 0,
@@ -399,6 +399,10 @@ function toast(msg) {
 
 async function loadStorages() {
   try { S.storages = await api('/api/storages'); } catch (e) { S.storages = []; toast('Could not list storages: ' + e.message); }
+  // Home shows internal storages first, then external ones (M.2 and extended
+  // storage before USB drives): keep that order here so a card's index is its
+  // place on screen.
+  S.storages.sort((a, b) => storageRank(a) - storageRank(b));
   S.hfocus = Math.min(S.hfocus, Math.max(0, S.storages.length - 1));
 }
 
@@ -1588,17 +1592,40 @@ function homeBtns(row) {
     `<div class="home-btn${S.hfocus === row && S.hbtn === i ? ' focus' : ''}" data-act="hbtn" data-r="${row}" data-i="${i}">${ICON[b[1]]}<span>${b[0]}</span></div>`).join('');
 }
 
+// Drives plugged into the console (M.2 slot, USB) rather than its own SSD.
+function isExternal(s) {
+  return s.kind === 'ext' || s.kind === 'usb' || /^\/mnt\/(ext|usb)\d/.test(s.path);
+}
+
+// Home order: internal 0, then M.2 / extended storage 1, then USB drives 2.
+function storageRank(s) {
+  if (!isExternal(s)) return 0;
+  return s.kind === 'ext' || /^\/mnt\/ext\d/.test(s.path) ? 1 : 2;
+}
+
+// The storage cards as they sit on screen: rows of up to two card indices,
+// each group (internal, then external) starting a row of its own.
+function homeRows() {
+  const rows = [];
+  for (const ext of [false, true]) {
+    const ids = S.storages.map((s, i) => i).filter((i) => isExternal(S.storages[i]) === ext);
+    for (let k = 0; k < ids.length; k += 2) rows.push(ids.slice(k, k + 2));
+  }
+  return rows;
+}
+
 function homeInput(a) {
   const n = S.storages.length, upd = updateReady();
-  const lastRow = n ? (n - 1) - ((n - 1) % 2) : 0; // first card of the bottom row
+  const rows = homeRows();
   if (S.hfocus === -1 && !upd) S.hfocus = n ? 0 : -2;
   const prev = S.hfocus;
+  S.hreveal = true;
   if (S.hfocus <= -2) {
     const btns = HOME_BTNS[S.hfocus];
     if (a === 'left' && S.hbtn > 0) S.hbtn--;
     else if (a === 'right' && S.hbtn < btns.length - 1) S.hbtn++;
     else if (a === 'down' && S.hfocus === -3) S.hfocus = upd ? -1 : n ? 0 : -2;
-    else if (a === 'up' && S.hfocus === -2) S.hfocus = n ? lastRow : upd ? -1 : -3;
+    else if (a === 'up' && S.hfocus === -2) S.hfocus = n ? rows[rows.length - 1][0] : upd ? -1 : -3;
     else if (a === 'confirm') { btns[S.hbtn][2](); return; }
     else if (a === 'menu') { openHomeMenu(); return; }
   } else if (S.hfocus === -1) {
@@ -1606,14 +1633,15 @@ function homeInput(a) {
     else if (a === 'down') S.hfocus = n ? 0 : -2;
     else if (a === 'confirm') { askUpdate(); return; }
     else if (a === 'menu') { openHomeMenu(); return; }
-  } else if (a === 'up' && S.hfocus >= 2) S.hfocus -= 2;
-  else if (a === 'up') S.hfocus = upd ? -1 : -3;
-  else if (a === 'down') {
-    if (S.hfocus >= lastRow) S.hfocus = -2;
-    else S.hfocus = Math.min(S.hfocus + 2, n - 1);
-  } else if (a === 'left' && S.hfocus % 2 === 1) S.hfocus--;
-  else if (a === 'right' && S.hfocus % 2 === 0 && S.hfocus + 1 < n) S.hfocus++;
-  else if (a === 'confirm' && S.storages[S.hfocus]) { startScan(S.storages[S.hfocus]); return; }
+  } else if (['up', 'down', 'left', 'right'].includes(a)) {
+    const r = rows.findIndex((row) => row.includes(S.hfocus));
+    const c = r < 0 ? 0 : rows[r].indexOf(S.hfocus);
+    const to = (row) => row[Math.min(c, row.length - 1)];
+    if (a === 'up') S.hfocus = r > 0 ? to(rows[r - 1]) : upd ? -1 : -3;
+    else if (a === 'down') S.hfocus = r >= 0 && r < rows.length - 1 ? to(rows[r + 1]) : -2;
+    else if (a === 'left' && c > 0) S.hfocus = rows[r][c - 1];
+    else if (a === 'right' && r >= 0 && c + 1 < rows[r].length) S.hfocus = rows[r][c + 1];
+  } else if (a === 'confirm' && S.storages[S.hfocus]) { startScan(S.storages[S.hfocus]); return; }
   else if (a === 'menu') { openHomeMenu(); return; }
   else if (a === 'review') { openSettings(); return; }
   else if (a === 'tabnext') { openAbout(); return; }
@@ -2129,8 +2157,11 @@ function render() {
     case 'review': [html, hints] = renderReview(); break;
     default: break;
   }
+  const oldCards = main.querySelector('.cards');
+  const cardsTop = oldCards ? oldCards.scrollTop : 0;
   main.innerHTML = html;
   $('#hints').innerHTML = hints;
+  if (S.screen === 'home') revealHomeFocus(cardsTop);
   if (S.screen === 'browse' && chart.el) {
     main.insertBefore(chart.el, main.querySelector('.center'));
     const f = focusedItem();
@@ -2181,16 +2212,25 @@ function renderHome() {
       <div class="path ellipsis">${S.update.state === 'failed' ? 'The last try failed. Try again' : `You have v${esc(S.update.current)}`} &middot; downloaded from GitHub</div>
     </div>`;
   }
-  S.storages.forEach((s, i) => {
+  const card = (s, i) => {
     const used = s.total ? 1 - s.free / s.total : 0;
-    h += `<div class="card${i === S.hfocus ? ' focus' : ''}" data-act="storage" data-i="${i}">
+    return `<div class="card${i === S.hfocus ? ' focus' : ''}" data-act="storage" data-i="${i}">
       <div class="ico">${driveIcon(s.kind)}</div>
       <div class="name ellipsis">${esc(s.name)}</div>
       <div class="path ellipsis">${esc(s.path)}</div>
       <div class="bar"><i class="${used > 0.9 ? 'full' : ''}" style="width:${(used * 100).toFixed(1)}%"></i></div>
       <div class="info ellipsis">${fmtSize(s.free)} free of ${fmtSize(s.total)} &middot; ${fmtSize(s.total - s.free)} used</div>
     </div>`;
-  });
+  };
+  if (S.storages.length) {
+    for (const [title, ext] of [['Internal', false], ['External', true]]) {
+      const group = S.storages.map(card).filter((c, i) => isExternal(S.storages[i]) === ext);
+      if (!group.length && !ext) continue;
+      h += `<div class="group-title">${title}</div>`;
+      h += group.length ? `<div class="grid">${group.join('')}</div>`
+        : '<div class="group-empty">No external drive connected. Plug in a USB drive or M.2 SSD.</div>';
+    }
+  }
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
   // The app's own actions sit in a toolbar of their own along the bottom.
@@ -2201,6 +2241,26 @@ function renderHome() {
   }
   h += '</div>';
   return [h, ''];
+}
+
+// The storage list scrolls when it is taller than the screen (many drives, big
+// text). Keep its place across renders, and after a button press bring the
+// focused card, with its group's title above it, into view.
+function revealHomeFocus(top) {
+  const box = $('#main .cards');
+  if (!box) return;
+  box.scrollTop = top;
+  const el = S.hreveal && box.querySelector('.card.focus');
+  S.hreveal = false;
+  if (!el) return;
+  const grid = el.parentNode.classList.contains('grid') ? el.parentNode : null;
+  const title = grid && grid.previousElementSibling;
+  const first = grid && grid.firstElementChild;
+  // The first row of a group shows its title too.
+  const from = title && el.offsetTop - first.offsetTop < el.offsetHeight ? title.offsetTop : el.offsetTop;
+  const to = el.offsetTop + el.offsetHeight;
+  if (from < box.scrollTop) box.scrollTop = from;
+  else if (to > box.scrollTop + box.clientHeight) box.scrollTop = to - box.clientHeight;
 }
 
 function renderProgress(op) {

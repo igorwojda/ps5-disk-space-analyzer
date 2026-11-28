@@ -216,7 +216,21 @@ svg { display: block; }
 .home-btn.focus .gear { color: var(--text); }
 .home-btn .gear { width: calc(34px * var(--fs)); height: calc(34px * var(--fs)); color: var(--dim); }
 [data-compact="1"] .home-btn .gear { display: none; }
-.cards { left: 140px; top: 220px; width: 1640px; display: grid; grid-template-columns: 800px 800px; gap: 24px 40px; }
+/* The storage list: internal drives, then external ones, each under a title.
+   It scrolls above the toolbar; the padding keeps the focus ring inside it. */
+.cards {
+  left: 132px; top: 204px; width: 1656px; padding: 8px;
+  bottom: calc(42px + 112px * var(--fs) + 16px); overflow-y: auto; scrollbar-width: none;
+}
+.cards::-webkit-scrollbar { display: none; }
+.cards .grid { display: grid; grid-template-columns: 800px 800px; gap: 24px 40px; }
+.cards > .card.update { margin-bottom: 24px; }
+.group-title {
+  font-size: calc(26px * var(--fs)); font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--dim); padding: 4px 4px calc(12px * var(--fs));
+}
+.grid + .group-title, .group-empty + .group-title { margin-top: calc(30px * var(--fs)); }
+.group-empty { font-size: calc(28px * var(--fs)); color: var(--faint); padding: 0 4px; }
 .card { position: relative; height: calc(196px * var(--fs)); min-height: 150px; border-radius: 22px; background: var(--panel);
         padding: calc(28px * var(--fs)) 30px 0 160px; box-shadow: 0 0 0 2px var(--panel-line); }
 .card.focus { background: var(--focus-bg); box-shadow: 0 0 0 4px var(--focus-ring); }
