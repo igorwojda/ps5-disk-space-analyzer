@@ -308,6 +308,15 @@ svg { display: block; }
 .dlg h2 { margin: 0 0 22px; font-size: calc(40px * var(--fs)); }
 .dlg p { margin: 0 0 8px; font-size: calc(28px * var(--fs)); color: var(--dim); }
 .dlg .warn { margin: 18px 0 0; padding: 14px 24px; border-radius: 14px; background: rgba(255, 200, 87, .12); color: var(--warn); font-size: calc(22px * var(--fs)); }
+.dlg .notes { max-height: 470px; overflow-y: auto; margin: 22px 0 0; padding: 4px 24px 4px 0; }
+.dlg .notes::-webkit-scrollbar { width: 8px; }
+.dlg .notes::-webkit-scrollbar-thumb { border-radius: 4px; background: rgba(255, 255, 255, .3); }
+.dlg .note + .note { margin-top: 26px; }
+.dlg .note h3 { margin: 0 0 10px; font-size: calc(28px * var(--fs)); color: var(--text); }
+.dlg .note p, .dlg .note li { margin: 0 0 8px; font-size: calc(24px * var(--fs)); line-height: 1.35; color: var(--dim); }
+.dlg .note ul { margin: 0 0 8px; padding-left: 30px; }
+.dlg .note b { color: var(--text); }
+.dlg .note code { font-size: .9em; overflow-wrap: anywhere; }
 .dlg .btns { display: flex; gap: 30px; margin-top: 34px; justify-content: flex-end; }
 .dlg .btns.v { flex-direction: column; gap: 12px; }
 .dlg .btns.v .btn { flex: none; }

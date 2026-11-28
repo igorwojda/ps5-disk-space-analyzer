@@ -10,6 +10,13 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
+
+// One release's notes (Markdown, as written on GitHub).
+struct ReleaseNote {
+  std::string version;  // without the leading "v"
+  std::string body;
+};
 
 struct UpdateStatus {
   // "checking", "none" (up to date), "available", "error" (check failed),
@@ -21,6 +28,9 @@ struct UpdateStatus {
   std::string latest;   // newest release, without the leading "v"
   uint64_t got = 0, size = 0;  // download progress
   std::string error;
+  // What changed in each version after this one up to `latest`, newest first.
+  // Empty until they are read, or when GitHub could not be asked.
+  std::vector<ReleaseNote> notes;
 };
 
 // Starts a check when none ran recently, or with `check` when the last one

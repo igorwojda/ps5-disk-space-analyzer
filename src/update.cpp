@@ -26,6 +26,9 @@
 
 #define UPDATE_REPO "igorwojda/ps5-disk-space-analyzer"
 static const char* const kLatestUrl = "https://api.github.com/repos/" UPDATE_REPO "/releases/latest";
+// Newest releases first, for the notes of each version since this one.
+static const char* const kListUrl = "https://api.github.com/repos/" UPDATE_REPO "/releases?per_page=30";
+static const size_t kMaxNotes = 10;          // versions shown in the update dialog
 // Only release files of this project are ever downloaded.
 static const char* const kDownloadPrefix = "https://github.com/" UPDATE_REPO "/releases/download/";
 static const char* const kAgent = "disk-space-analyzer/" APP_VERSION;
@@ -197,7 +200,35 @@ std::string JsonString(const std::string& j, const std::string& key, size_t from
       }
       if (j[i] == '\\' && i + 1 < j.size()) {
         char e = j[++i];
-        out += e == 'n' ? '\n' : e == 't' ? '\t' : e;  // \", \\, \/
+        if (e == 'u' && i + 4 < j.size()) {
+          unsigned cp = (unsigned)std::strtoul(j.substr(i + 1, 4).c_str(), nullptr, 16);
+          i += 4;
+          // A pair of \u escapes for one character past U+FFFF.
+          if (cp >= 0xD800 && cp < 0xDC00 && i + 6 < j.size() && j[i + 1] == '\\' && j[i + 2] == 'u') {
+            unsigned lo = (unsigned)std::strtoul(j.substr(i + 3, 4).c_str(), nullptr, 16);
+            if (lo >= 0xDC00 && lo < 0xE000) {
+              cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+              i += 6;
+            }
+          }
+          if (cp < 0x80) {
+            out += (char)cp;
+          } else if (cp < 0x800) {
+            out += (char)(0xC0 | (cp >> 6));
+            out += (char)(0x80 | (cp & 0x3F));
+          } else if (cp < 0x10000) {
+            out += (char)(0xE0 | (cp >> 12));
+            out += (char)(0x80 | ((cp >> 6) & 0x3F));
+            out += (char)(0x80 | (cp & 0x3F));
+          } else {
+            out += (char)(0xF0 | (cp >> 18));
+            out += (char)(0x80 | ((cp >> 12) & 0x3F));
+            out += (char)(0x80 | ((cp >> 6) & 0x3F));
+            out += (char)(0x80 | (cp & 0x3F));
+          }
+        } else {
+          out += e == 'n' ? '\n' : e == 't' ? '\t' : e == 'r' ? '\r' : e == 'b' ? '\b' : e == 'f' ? '\f' : e;  // \", \\, \/
+        }
       } else {
         out += j[i];
       }
@@ -230,6 +261,8 @@ struct State {
   uint64_t size = 0;
   std::atomic<uint64_t> got{0};
   std::string error;
+  std::vector<ReleaseNote> notes;  // versions after this one, up to `notes_for`
+  std::string notes_for;           // the latest version the notes were read for
 };
 State g;
 
@@ -274,6 +307,31 @@ bool FetchLatest(Release* r, std::string* err) {
   return true;
 }
 
+// The notes of every release after this copy, up to `latest`, newest first.
+bool FetchNotes(const std::string& latest, std::vector<ReleaseNote>* out, std::string* err) {
+  Fetch f;
+  if (!Get(kListUrl, &f)) {
+    *err = f.error;
+    return false;
+  }
+  // Each release's fields, its "body" included, come after its "tag_name"
+  // and before the next release's.
+  std::vector<size_t> tags;
+  for (size_t p = f.body.find("\"tag_name\""); p != std::string::npos; p = f.body.find("\"tag_name\"", p + 1)) tags.push_back(p);
+  for (size_t i = 0; i < tags.size() && out->size() < kMaxNotes; i++) {
+    size_t end = i + 1 < tags.size() ? tags[i + 1] : f.body.size();
+    std::string one = f.body.substr(tags[i], end - tags[i]);
+    std::string v = StripV(JsonString(one, "tag_name"));
+    if (CompareVersions(v, APP_VERSION) <= 0 || CompareVersions(v, latest) > 0) continue;
+    std::string body = JsonString(one, "body");
+    body.erase(std::remove(body.begin(), body.end(), '\r'), body.end());
+    out->push_back({v, body});
+  }
+  std::sort(out->begin(), out->end(),
+            [](const ReleaseNote& a, const ReleaseNote& b) { return CompareVersions(a.version, b.version) > 0; });
+  return true;
+}
+
 // Newer than this copy, with an .elf of this project to install.
 bool Installable(const Release& r) {
   if (CompareVersions(r.latest, APP_VERSION) <= 0) return false;
@@ -289,6 +347,25 @@ void* CheckThread(void*) {
   std::string err;
   bool ok = FetchLatest(&r, &err);
   bool newer = ok && Installable(r);
+
+  // What changed since this copy: read once for each newer version found.
+  // Without them the update is still shown, and the next check tries again.
+  if (newer) {
+    bool known;
+    {
+      std::lock_guard<std::mutex> lock(g.mu);
+      known = g.notes_for == r.latest;
+    }
+    std::vector<ReleaseNote> notes;
+    std::string nerr;
+    if (!known && FetchNotes(r.latest, &notes, &nerr)) {
+      std::lock_guard<std::mutex> lock(g.mu);
+      g.notes = std::move(notes);
+      g.notes_for = r.latest;
+    } else if (!known) {
+      Log("update notes: %s", nerr.c_str());
+    }
+  }
 
   std::lock_guard<std::mutex> lock(g.mu);
   g.checking = false;
@@ -439,6 +516,7 @@ UpdateStatus GetUpdateStatus(bool check) {
   s.size = g.size;
   s.got = g.got;
   s.error = g.error;
+  if (g.notes_for == g.latest) s.notes = g.notes;
   return s;
 }
 

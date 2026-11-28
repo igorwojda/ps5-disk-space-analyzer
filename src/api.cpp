@@ -142,6 +142,12 @@ std::string Esc(const std::string& s) {
 
 std::string Str(const std::string& s) { return "\"" + Esc(s) + "\""; }
 std::string Num(uint64_t v) { return std::to_string(v); }
+std::string NotesJson(const std::vector<ReleaseNote>& notes) {
+  std::string o = "[";
+  for (size_t i = 0; i < notes.size(); i++)
+    o += (i ? ",{\"version\":" : "{\"version\":") + Str(notes[i].version) + ",\"body\":" + Str(notes[i].body) + "}";
+  return o + "]";
+}
 const char* Bool(bool b) { return b ? "true" : "false"; }
 
 std::string StorageJson(const Storage& s) {
@@ -953,7 +959,7 @@ void ApiHandle(const Request& req, Response& res) {
     UpdateStatus u = GetUpdateStatus(c != req.query.end() && c->second == "1");
     Json(res, 200, "{\"state\":" + Str(u.state) + ",\"checking\":" + (u.checking ? "true" : "false") + ",\"current\":" + Str(u.current) + ",\"latest\":" +
                        Str(u.latest) + ",\"got\":" + Num(u.got) + ",\"size\":" + Num(u.size) +
-                       ",\"error\":" + Str(u.error) + "}");
+                       ",\"error\":" + Str(u.error) + ",\"notes\":" + NotesJson(u.notes) + "}");
     return;
   }
 

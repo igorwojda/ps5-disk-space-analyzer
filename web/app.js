@@ -1398,6 +1398,7 @@ function askUpdate() {
   showDialog({
     title: `Update to v${u.latest}?`,
     lines: ['The new version is downloaded and starts in place of this one.'],
+    notes: u.notes || [], noteScroll: 0,
     buttons: ['Not now', 'Update'], cancel: 0, focus: 1,
     onChoose: (i) => { if (i === 1) runUpdate(); },
   });
@@ -1547,6 +1548,14 @@ function dialogInput(a) {
   const d = S.dialog;
   if (d.settings) { settingsInput(a); return; }
   const n = d.buttons.length;
+  // Up, Down, L2 and R2 scroll the release notes.
+  const box = d.notes && d.notes.length ? document.querySelector('#dialog .notes') : null;
+  if (box && !d.vertical && ['up', 'down', 'pageup', 'pagedown'].includes(a)) {
+    const step = a === 'up' || a === 'down' ? 80 : box.clientHeight - 60;
+    box.scrollTop += a === 'up' || a === 'pageup' ? -step : step;
+    d.noteScroll = box.scrollTop;
+    return;
+  }
   const prev = d.vertical ? a === 'up' : a === 'left';
   const next = d.vertical ? a === 'down' : a === 'right';
   if (prev || next) {
@@ -2628,11 +2637,46 @@ function renderDialog() {
   const one = d.buttons.length === 1;
   box.innerHTML = `<div class="dlg"><h2>${esc(d.title)}</h2>
     ${d.lines.map((l) => `<p>${glyphText(l)}</p>`).join('')}
+    ${d.notes && d.notes.length ? `<div class="notes">${d.notes.map(noteHtml).join('')}</div>` : ''}
     ${d.warning ? `<div class="warn">${esc(d.warning)}</div>` : ''}
     <div class="btns${d.vertical ? ' v' : ''}${one ? ' one' : ''}">
       ${d.buttons.map((b, i) => `<div class="btn${i === d.focus ? ' focus' : ''}${i === d.hold && d.danger ? ' danger' : ''}"
          data-act="dlg" data-i="${i}">${i === d.hold ? `<i class="fill"></i><span class="btn-ico">${GLYPH.cross}</span>` : ''}<span>${glyphText(b)}</span></div>`).join('')}
     </div></div>`;
+  // Each render builds the box again: keep where it was scrolled to.
+  const notes = box.querySelector('.notes');
+  if (notes) {
+    notes.scrollTop = d.noteScroll || 0;
+    notes.onscroll = () => { d.noteScroll = notes.scrollTop; };
+  }
+}
+
+// One release's notes, from the Markdown written on GitHub: paragraphs, "- "
+// lists, **bold**, `code` and [links] (as text). How to install by hand and
+// the checksum are left out: the app does both.
+function noteHtml(n) {
+  const inline = (t) => esc(t)
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  let h = '';
+  for (const block of (n.body || '').split(/\n\s*\n/)) {
+    const t = block.trim();
+    if (!t || /^(\*\*)?install/i.test(t) || /^sha-?256/i.test(t) || /^-{3,}$/.test(t)) continue;
+    const lines = t.split('\n');
+    if (lines.every((l) => /^\s*[-*] /.test(l) || /^\s{2,}\S/.test(l))) {
+      // A line indented under an item continues it.
+      const items = [];
+      for (const l of lines) {
+        if (/^\s*[-*] /.test(l)) items.push(l.replace(/^\s*[-*] /, ''));
+        else items[items.length - 1] += ' ' + l.trim();
+      }
+      h += `<ul>${items.map((x) => `<li>${inline(x)}</li>`).join('')}</ul>`;
+    } else {
+      h += `<p>${inline(lines.join(' ').replace(/^#+\s*/, ''))}</p>`;
+    }
+  }
+  return `<div class="note"><h3>v${esc(n.version)}</h3>${h}</div>`;
 }
 
 function settingsHtml(d) {
