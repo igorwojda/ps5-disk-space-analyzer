@@ -240,7 +240,7 @@ function openAbout() {
 
 const S = {
   screen: 'home',
-  storages: [], hfocus: 0,
+  storages: [], hfocus: 0, hbtn: 0,
   storage: null, rootId: 0, rootNode: null,
   node: null, tab: 0, focus: 0, scroll: 0,
   biggest: [], bfocus: 0, bscroll: 0,
@@ -1536,18 +1536,42 @@ function input(a, src) {
   }
 }
 
-// Home focus: a storage card, or -1 for the update card above them.
+// Home focus: a storage card, -1 for the update card above them, -3 for the
+// buttons in the top right corner or -2 for the toolbar along the bottom
+// (S.hbtn picks the button in that row).
+const HOME_BTNS = {
+  '-3': [['Settings', 'gear', () => openSettings()], ['About', 'info', () => openAbout()]],
+  '-2': [['Export Report', 'report', () => openExport(S.storages[0] ? S.storages[0].path : '')]],
+};
+
+function homeBtns(row) {
+  return HOME_BTNS[row].map((b, i) =>
+    `<div class="home-btn${S.hfocus === row && S.hbtn === i ? ' focus' : ''}" data-act="hbtn" data-r="${row}" data-i="${i}">${ICON[b[1]]}<span>${b[0]}</span></div>`).join('');
+}
+
 function homeInput(a) {
-  const n = S.storages.length;
-  if (S.hfocus < 0 && !updateReady()) S.hfocus = 0;
-  if (S.hfocus < 0) {
-    if (a === 'down' && n) S.hfocus = 0;
+  const n = S.storages.length, upd = updateReady();
+  const lastRow = n ? (n - 1) - ((n - 1) % 2) : 0; // first card of the bottom row
+  if (S.hfocus === -1 && !upd) S.hfocus = n ? 0 : -2;
+  const prev = S.hfocus;
+  if (S.hfocus <= -2) {
+    const btns = HOME_BTNS[S.hfocus];
+    if (a === 'left' && S.hbtn > 0) S.hbtn--;
+    else if (a === 'right' && S.hbtn < btns.length - 1) S.hbtn++;
+    else if (a === 'down' && S.hfocus === -3) S.hfocus = upd ? -1 : n ? 0 : -2;
+    else if (a === 'up' && S.hfocus === -2) S.hfocus = n ? lastRow : upd ? -1 : -3;
+    else if (a === 'confirm') { btns[S.hbtn][2](); return; }
+    else if (a === 'menu') { openHomeMenu(); return; }
+  } else if (S.hfocus === -1) {
+    if (a === 'up') S.hfocus = -3;
+    else if (a === 'down') S.hfocus = n ? 0 : -2;
     else if (a === 'confirm') { askUpdate(); return; }
+    else if (a === 'menu') { openHomeMenu(); return; }
   } else if (a === 'up' && S.hfocus >= 2) S.hfocus -= 2;
-  else if (a === 'up' && updateReady()) S.hfocus = -1;
+  else if (a === 'up') S.hfocus = upd ? -1 : -3;
   else if (a === 'down') {
-    if (S.hfocus + 2 < n) S.hfocus += 2;
-    else if (S.hfocus % 2 === 0 && S.hfocus + 1 < n) S.hfocus += 1;
+    if (S.hfocus >= lastRow) S.hfocus = -2;
+    else S.hfocus = Math.min(S.hfocus + 2, n - 1);
   } else if (a === 'left' && S.hfocus % 2 === 1) S.hfocus--;
   else if (a === 'right' && S.hfocus % 2 === 0 && S.hfocus + 1 < n) S.hfocus++;
   else if (a === 'confirm' && S.storages[S.hfocus]) { startScan(S.storages[S.hfocus]); return; }
@@ -1555,6 +1579,7 @@ function homeInput(a) {
   else if (a === 'review') { openSettings(); return; }
   else if (a === 'tabnext') { openAbout(); return; }
   else if (a === 'mark') { openExport(S.storages[S.hfocus] ? S.storages[S.hfocus].path : ''); return; }
+  if (S.hfocus !== prev && S.hfocus <= -2) S.hbtn = 0;
   render();
 }
 
@@ -1692,6 +1717,7 @@ function act(el) {
   switch (k) {
     case 'storage': S.hfocus = i; startScan(S.storages[i]); break;
     case 'update': S.hfocus = -1; askUpdate(); break;
+    case 'hbtn': S.hfocus = Number(el.dataset.r); S.hbtn = i; HOME_BTNS[S.hfocus][i][2](); break;
     case 'tab': setTab(i); S.hover = null; render(); break;
     case 'crumb': S.tab = 0; openNode(i); break;
     case 'check': {
@@ -1766,6 +1792,7 @@ function hover(el) {
   let changed = false;
   if (k === 'storage' && S.hfocus !== i) { S.hfocus = i; changed = true; }
   if (k === 'update' && S.hfocus !== -1) { S.hfocus = -1; changed = true; }
+  if (k === 'hbtn' && (S.hfocus !== Number(el.dataset.r) || S.hbtn !== i)) { S.hfocus = Number(el.dataset.r); S.hbtn = i; changed = true; }
   if ((k === 'row' || k === 'check') && S.screen === 'browse' && S.mfocus >= 0) { S.mfocus = -1; changed = true; }
   if (k === 'mbtn' && S.mfocus !== i) { S.mfocus = i; changed = true; }
   if (k === 'row' || k === 'check') {
@@ -2103,16 +2130,12 @@ function header(title, sub, tabs) {
 function renderHome() {
   let h = `<div class="abs home-title">Disk Space Analyzer</div>
     <div class="abs home-sub">Choose a storage to scan. Find what takes space, select it, clean it up.</div>
-    <div class="abs home-actions">
-      <div class="home-btn" data-act="hint" data-a="mark">${GLYPH.square}${ICON.report}<span>Export Report</span></div>
-      <div class="home-btn" data-act="hint" data-a="review">${GLYPH.triangle}${ICON.gear}<span>Settings</span></div>
-      <div class="home-btn" data-act="hint" data-a="tabnext">${GLYPH.r1}${ICON.info}<span>About</span></div>
-    </div>
+    <div class="abs home-actions">${homeBtns(-3)}</div>
     <div class="abs cards">`;
   const upd = updateReady();
-  if (S.hfocus < 0 && !upd) S.hfocus = 0;
+  if (S.hfocus === -1 && !upd) S.hfocus = S.storages.length ? 0 : -2;
   if (upd) {
-    h += `<div class="card update${S.hfocus < 0 ? ' focus' : ''}" data-act="update">
+    h += `<div class="card update${S.hfocus === -1 ? ' focus' : ''}" data-act="update">
       <div class="ico">${ICON.update}</div>
       <div class="name ellipsis">Update to v${esc(S.update.latest)}</div>
       <div class="path ellipsis">${S.update.state === 'failed' ? 'The last try failed. Try again' : `You have v${esc(S.update.current)}`} &middot; downloaded from GitHub</div>
@@ -2130,13 +2153,14 @@ function renderHome() {
   });
   h += '</div>';
   if (!S.storages.length) h += '<div class="abs empty">No storage found</div>';
-  let hints = hint('cross', S.hfocus < 0 ? 'Update' : 'Scan', 'confirm') + hint('square', 'Export Report', 'mark') +
-              hint('triangle', 'Settings', 'review') + hint('r1', 'About', 'tabnext') + hint('circle', 'Close');
+  // The app's own actions sit in a toolbar of their own along the bottom.
+  h += `<div class="abs home-tools">${homeBtns(-2)}`;
   if (S.clip) {
-    hints += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
+    h += `<div class="hint-right"><div class="pill move">${fmtCount(S.clip.length)} ${S.clipMode === 'move' ? 'to move' : 'cut'} &middot; ${fmtSize(clipBytes())}
       &middot; scan a storage, open a folder</div></div>`;
   }
-  return [h, hints];
+  h += '</div>';
+  return [h, ''];
 }
 
 function renderProgress(op) {

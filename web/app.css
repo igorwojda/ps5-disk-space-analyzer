@@ -202,11 +202,18 @@ svg { display: block; }
 .home-title { left: 140px; top: 60px; font-size: calc(56px * var(--fs)); font-weight: 700; }
 .home-sub { left: 140px; top: calc(60px + 76px * var(--fs)); font-size: calc(28px * var(--fs)); color: var(--dim); }
 .home-actions { right: 140px; top: 66px; display: flex; gap: 20px; }
+.home-tools {
+  left: 0; bottom: 42px; width: 1920px; height: calc(112px * var(--fs)); padding: 0 140px;
+  display: flex; align-items: center; gap: 20px;
+  background: var(--bar-bg); border-top: 2px solid rgba(255, 255, 255, .1);
+}
 .home-btn {
   height: calc(64px * var(--fs)); padding: 0 32px 0 12px; border-radius: 40px;
   display: flex; align-items: center; gap: 12px; background: var(--panel); box-shadow: 0 0 0 2px var(--panel-line);
   font-size: calc(28px * var(--fs)); font-weight: 700; color: var(--text);
 }
+.home-btn.focus { background: var(--focus-bg); box-shadow: 0 0 0 4px var(--focus-ring); }
+.home-btn.focus .gear { color: var(--text); }
 .home-btn .gear { width: calc(34px * var(--fs)); height: calc(34px * var(--fs)); color: var(--dim); }
 [data-compact="1"] .home-btn .gear { display: none; }
 .cards { left: 140px; top: 220px; width: 1640px; display: grid; grid-template-columns: 800px 800px; gap: 24px 40px; }
