@@ -21,6 +21,7 @@
 #include "games.h"
 #include "platform.h"
 #include "report.h"
+#include "settings.h"
 #include "system.h"
 #include "tree.h"
 #include "uninstall.h"
@@ -81,22 +82,36 @@ std::vector<std::string> g_extra;  // extra folders offered as storages
 unsigned short g_port = 0;
 
 // Remote Management: other devices on the network may use the app. On by
-// default; turning it off leaves a marker file, so it stays off after a restart.
-#if defined(__PROSPERO__)
-const char* const kRemoteOffFile = "/data/disk-space-analyzer/remote-off";
-#else
-const char* const kRemoteOffFile = nullptr;  // computer: for this run only
-#endif
+// default; saved as "remote" in settings.json, so it stays as set after a restart.
 std::atomic<bool> g_remote{true};
 
 void SetRemote(bool on) {
   g_remote = on;
-  if (!kRemoteOffFile) return;
-  if (on) {
-    unlink(kRemoteOffFile);
-  } else if (FILE* f = std::fopen(kRemoteOffFile, "w")) {
-    std::fclose(f);
+  SetSetting("remote", on);
+}
+
+// The settings a page may save through /api/settings, and the JSON each value
+// is kept as. fullscreenAsked: the app's own note, not shown in Settings.
+// Remote Management has its own route: only the PS5 may change it.
+bool SettingValue(const std::string& key, const std::string& v, std::string& json) {
+  if (key == "fullscreen" || key == "fullscreenAsked") {
+    json = v;
+    return v == "true" || v == "false";
   }
+  if (key == "textSize") {
+    char* end = nullptr;
+    double d = std::strtod(v.c_str(), &end);
+    if (v.empty() || *end || !(d >= 0.5 && d <= 1.5)) return false;
+    char b[16];
+    std::snprintf(b, sizeof b, "%g", d);
+    json = b;
+    return true;
+  }
+  if (key == "theme") {
+    json = "\"" + v + "\"";
+    return v == "blue" || v == "black" || v == "contrast";
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- json
@@ -796,8 +811,11 @@ void ApiInit(const std::string& web_dir, const std::vector<std::string>& extra, 
   g_web_dir = web_dir;
   g_extra = extra;
   g_port = port;
-  struct stat st;
-  if (kRemoteOffFile && stat(kRemoteOffFile, &st) == 0) g_remote = false;
+#if defined(__PROSPERO__)
+  // Older builds marked "off" with an empty file instead.
+  if (unlink("/data/disk-space-analyzer/remote-off") == 0) SetSetting("remote", false);
+#endif
+  g_remote = SettingBool("remote", true);
   Log("remote management %s", g_remote ? "on" : "off");
 }
 
@@ -841,6 +859,21 @@ void ApiHandle(const Request& req, Response& res) {
     std::string ip = IsLoopback(req.local_ip) ? LanAddress() : req.local_ip;
     Json(res, 200, "{\"version\":" + Str(APP_VERSION) + ",\"ip\":" + Str(ip) + ",\"port\":" + Num(g_port) +
                       ",\"remote\":" + (g_remote ? "true" : "false") + "}");
+    return;
+  }
+
+  // GET: settings.json. POST ?key=&value=: saves one setting, answers with them all.
+  if (p == "/api/settings") {
+    if (req.method == "POST") {
+      auto k = req.query.find("key"), v = req.query.find("value");
+      std::string json;
+      if (k == req.query.end() || v == req.query.end() || !SettingValue(k->second, v->second, json)) {
+        Error(res, 400, "Not a setting, or not one of its values");
+        return;
+      }
+      SetSettingJson(k->second, json);
+    }
+    Json(res, 200, SettingsJson());
     return;
   }
 

@@ -104,8 +104,9 @@ const ON_PS5 = /PlayStation/i.test(navigator.userAgent);
 // The page was opened on the PS5 itself (the tile opens 127.0.0.1), not from another device.
 const LOCAL = /^(localhost|127\.|\[::1\])/.test(location.hostname);
 
-// Kept in this browser's localStorage, so each device has its own. server: kept
-// by the payload instead, shared by every device, changed only on the PS5.
+// Kept by the payload in /data/disk-space-analyzer/settings.json, shared by every
+// device: deleting the file brings back the defaults. route: Remote Management
+// has its own, which only the PS5 may use.
 const SETTINGS = [
   { key: 'fullscreen', label: 'Full screen', values: [false, true], def: false, ps5: true,
     show: (v) => (v ? 'On' : 'Off') },
@@ -113,22 +114,40 @@ const SETTINGS = [
     show: (v) => Math.round(v * 100) + '%' },
   { key: 'theme', label: 'Theme', values: ['blue', 'black', 'contrast'], def: 'blue',
     show: (v) => ({ blue: 'Blue', black: 'Pure black', contrast: 'High contrast' })[v] },
-  { key: 'remote', label: 'Remote Management', values: [false, true], def: true, server: true, local: true,
+  { key: 'remote', label: 'Remote Management', values: [false, true], def: true, route: '/api/remote', local: true,
     show: (v) => (v ? 'On' : 'Off') },
 ].filter((d) => (!d.ps5 || ON_PS5) && (!d.local || LOCAL));
-const SETTINGS_KEY = 'dsa.settings';
 const settings = {};
+let savedSettings = {};       // settings.json, as the payload last sent it
+let settingsLoaded = false;   // ... and whether it did
 
-function loadSettings() {
-  let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { /* no storage */ }
-  for (const d of SETTINGS)  // server ones: the default until /api/info answers
-    settings[d.key] = !d.server && d.values.includes(saved[d.key]) ? saved[d.key] : d.def;
+async function loadSettings() {
+  try {
+    savedSettings = await api('/api/settings');
+    settingsLoaded = true;
+    await moveOldSettings();
+  } catch (e) { /* the defaults */ }
+  for (const d of SETTINGS)  // Remote Management: from /api/info
+    if (!d.route) settings[d.key] = d.values.includes(savedSettings[d.key]) ? savedSettings[d.key] : d.def;
 }
-function saveSettings() {
-  const own = {};
-  for (const d of SETTINGS) if (!d.server) own[d.key] = settings[d.key];
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(own)); } catch (e) { /* no storage */ }
+
+async function saveSetting(key, v) {
+  savedSettings = await api(`/api/settings?key=${key}&value=${encodeURIComponent(v)}`, 'POST');
+}
+
+// Older builds kept settings in the browser: moved into settings.json once,
+// unless the file has its own value already.
+async function moveOldSettings() {
+  let old;
+  try {
+    old = JSON.parse(localStorage.getItem('dsa.settings')) || {};
+    if (localStorage.getItem('dsa.fullscreenAsked')) old.fullscreenAsked = true;
+  } catch (e) { return; }
+  for (const [k, v] of Object.entries(old)) {
+    if (k in savedSettings) continue;
+    try { await saveSetting(k, v); } catch (e) { /* not a setting any more */ }
+  }
+  try { localStorage.removeItem('dsa.settings'); localStorage.removeItem('dsa.fullscreenAsked'); } catch (e) { /* no storage */ }
 }
 
 const ROWS_H = 714, ROW_GAP = 6, ROWS_END = 928;
@@ -172,28 +191,27 @@ function stepSetting(i, dir) {
   const d = SETTINGS[i];
   const k = d.values.indexOf(settings[d.key]) + dir;
   if (k < 0 || k >= d.values.length) return;
-  if (d.server) { setServerSetting(d, d.values[k]); return; }
-  settings[d.key] = d.values[k];
-  saveSettings();
-  applySettings();
-  render();
-  if (d.key === 'fullscreen') applyFullscreen(false);
+  setSetting(d, d.values[k]);
 }
 
 // Shown at once, taken back if the payload refuses.
-async function setServerSetting(d, v) {
+async function setSetting(d, v) {
   const old = settings[d.key];
   settings[d.key] = v;
+  applySettings();
   render();
   try {
-    const r = await api(`/api/${d.key}?on=${v ? 1 : 0}`, 'POST');
-    settings[d.key] = r[d.key];
+    if (d.route) settings[d.key] = (await api(`${d.route}?on=${v ? 1 : 0}`, 'POST'))[d.key];
+    else await saveSetting(d.key, v);
   } catch (e) {
     settings[d.key] = old;
+    applySettings();
     toast('Could not change ' + d.label + ': ' + e.message);
   }
   renderStatus();
   render();
+  // Saved first: the browser closes to switch.
+  if (d.key === 'fullscreen' && settings.fullscreen === v) applyFullscreen(false);
 }
 
 // ================================================================ full screen
@@ -218,6 +236,24 @@ async function applyFullscreen(auto) {
     return;
   }
   if (r.started) toast(full ? 'Switching to full screen…' : 'Switching back to a window…');
+}
+
+// Offered once, on the first start in a windowed browser. The answer is noted as
+// fullscreenAsked in settings.json, which Settings does not show. Noted only
+// after an answer, so a browser closed on the question asks again.
+function askFullscreen() {
+  if (!ON_PS5 || !settingsLoaded || savedSettings.fullscreenAsked || settings.fullscreen ||
+      browserFullscreen() || S.dialog) return;
+  showDialog({
+    title: 'Use full screen?',
+    lines: ['The app gets the whole screen, without the browser bar. The browser closes and opens again to switch.',
+            'You can change it later in Settings, Full screen.'],
+    buttons: ['Not now', 'Full screen'], cancel: 0, focus: 1,
+    onChoose: async (i) => {
+      try { await saveSetting('fullscreenAsked', true); } catch (e) { /* asks again next time */ }
+      if (i === 1) setSetting(SETTINGS.find((d) => d.key === 'fullscreen'), true);
+    },
+  });
 }
 
 function openSettings() {
@@ -2541,7 +2577,7 @@ function settingsHtml(d) {
   }).join('');
   const close = d.focus === SETTINGS.length;
   return `<div class="dlg"><h2>Settings</h2>${rows}
-    <p class="set-preview">Changes apply right away and are saved on this device${
+    <p class="set-preview">Changes apply right away and are saved on the PS5, for every device${
       LOCAL ? '. Remote Management lets phones and computers on your network open the app' : ''}.</p>
     <div class="btns one"><div class="btn${close ? ' focus' : ''}" data-act="dlg" data-i="0"><span>Close</span></div></div></div>`;
 }
@@ -2593,7 +2629,7 @@ function fit() {
 window.addEventListener('resize', fit);
 
 async function start() {
-  loadSettings();
+  await loadSettings();
   applySettings();
   fit();
   render();
@@ -2643,4 +2679,5 @@ async function start() {
     render();
   }
 }
-start();
+// After start: resuming a drive closes any dialog open by then.
+start().finally(askFullscreen);

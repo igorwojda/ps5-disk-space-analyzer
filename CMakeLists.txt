@@ -77,6 +77,7 @@ add_executable(disk-space-analyzer
   src/launcher.cpp
   src/platform.cpp
   src/report.cpp
+  src/settings.cpp
   src/system.cpp
   src/tree.cpp
   src/uninstall.cpp
