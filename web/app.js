@@ -1390,8 +1390,7 @@ function askUpdate() {
   const u = S.update;
   showDialog({
     title: `Update to v${u.latest}?`,
-    lines: [`You have v${u.current}. The newest version is downloaded from GitHub and starts in place of this one.`,
-            'It takes a few seconds. A running scan is lost; your settings stay.'],
+    lines: ['The new version is downloaded and starts in place of this one.'],
     buttons: ['Not now', 'Update'], cancel: 0, focus: 1,
     onChoose: (i) => { if (i === 1) runUpdate(); },
   });
